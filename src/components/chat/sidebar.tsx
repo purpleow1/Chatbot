@@ -2,10 +2,12 @@
 
 import { useRouter } from "next/navigation"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { MessageSquarePlus, X } from "lucide-react"
+import { Menu } from "@base-ui/react/menu"
+import { ChevronUp, LogOut, MessageSquarePlus, User, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { chatKeys, createChat, fetchChats } from "@/lib/api/chats"
+import { signOut } from "@/app/actions/auth"
 import { ChatItem } from "./chat-item"
 import { useAuth } from "@/providers/auth-provider"
 
@@ -89,14 +91,43 @@ export function Sidebar({ onClose }: SidebarProps) {
         ))}
       </nav>
 
-      {/* Footer */}
+      {/* Footer — user menu */}
       {user && (
-        <div className="shrink-0 border-t border-sidebar-border px-3 py-2">
-          <p className="truncate text-xs text-sidebar-foreground/50">
-            {user.is_anonymous
-              ? "Anonymous"
-              : (user.email ?? user.user_metadata?.name ?? "User")}
-          </p>
+        <div className="shrink-0 border-t border-sidebar-border p-2">
+          <Menu.Root>
+            <Menu.Trigger className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
+              {/* Avatar */}
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-[10px] font-medium text-sidebar-primary-foreground">
+                {user.is_anonymous ? (
+                  <User className="size-3" />
+                ) : (
+                  (user.email ?? user.user_metadata?.name ?? "U")
+                    .charAt(0)
+                    .toUpperCase()
+                )}
+              </span>
+              <span className="flex-1 truncate text-xs text-sidebar-foreground">
+                {user.is_anonymous
+                  ? "Anonymous"
+                  : (user.email ?? user.user_metadata?.name ?? "User")}
+              </span>
+              <ChevronUp className="size-3.5 shrink-0 text-sidebar-foreground/50" />
+            </Menu.Trigger>
+
+            <Menu.Portal>
+              <Menu.Positioner side="top" sideOffset={6} align="start" alignOffset={0}>
+                <Menu.Popup className="z-50 w-56 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[ending-style]:animate-out data-[starting-style]:animate-in data-[ending-style]:fade-out-0 data-[starting-style]:fade-in-0 data-[ending-style]:zoom-out-95 data-[starting-style]:zoom-in-95">
+                  <Menu.Item
+                    className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive outline-none data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
+                    onClick={() => signOut()}
+                  >
+                    <LogOut className="size-3.5" />
+                    Log out
+                  </Menu.Item>
+                </Menu.Popup>
+              </Menu.Positioner>
+            </Menu.Portal>
+          </Menu.Root>
         </div>
       )}
     </div>
