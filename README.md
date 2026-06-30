@@ -65,9 +65,17 @@ A ChatGPT-style AI chatbot with streaming responses, conversation history, image
 
 4. **Apply database migrations**
 
+   Open the [Supabase SQL Editor](https://supabase.com/dashboard/project/_/sql) for your project, paste the contents of `supabase/migrations/20260630000000_initial_schema.sql`, and run it.
+
+   Alternatively, use the Supabase CLI (requires `supabase` CLI installed and project linked):
+
    ```bash
-   # (instructions added in Phase 1)
+   supabase db push
    ```
+
+   After running the migration:
+   - Enable **Anonymous Sign-Ins** in your Supabase project: Authentication → Settings → Enable Anonymous Sign-ins.
+   - Create a private Storage bucket named `attachments`: Storage → New bucket → name `attachments`, uncheck "Public bucket".
 
 5. **Run the development server**
 
