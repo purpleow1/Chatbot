@@ -17,8 +17,9 @@ if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
  * its own free-tier daily request budget, so switching is an easy way to work
  * around a per-model quota (HTTP 429). Uncomment exactly one.
  */
-// export const CHAT_MODEL_ID = "gemini-2.5-flash"; // hit free-tier daily quota (20 req/day)
-export const CHAT_MODEL_ID = "gemini-2.5-flash-lite";
+// export const CHAT_MODEL_ID = "gemini-2.5-flash";
+// export const CHAT_MODEL_ID = "gemini-2.5-flash-lite";
+export const CHAT_MODEL_ID = "gemini-3.1-flash-lite";
 
 export const chatModel = google(CHAT_MODEL_ID);
 

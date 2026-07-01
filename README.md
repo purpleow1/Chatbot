@@ -117,4 +117,6 @@ All routes are auth-guarded and scoped to the signed-in (or anonymous) user.
 
 1. Push this repo to GitHub, then in Vercel: **Add New → Project → Import** the repo (framework auto-detects as Next.js).
 2. Add the five environment variables from `.env.example` in **Settings → Environment Variables** (Production + Preview).
-3. Deploy, then add the resulting `https://<app>.vercel.app` URL to Supabase → Authentication → URL Configuration (Site URL + Redirect URLs) so OAuth works in production.
+3. Deploy, then open Supabase → **Authentication → URL Configuration**:
+   - **Site URL** → `https://<app>.vercel.app` (the default post-login destination).
+   - **Redirect URLs** → add `https://<app>.vercel.app/auth/callback` (Supabase rejects any redirect not on this list, which breaks OAuth).
