@@ -111,7 +111,7 @@ function Conversation({
     [chatId],
   )
 
-  const { messages, sendMessage, status, stop, error } = useChat({
+  const { messages, sendMessage, status, stop, error, setMessages } = useChat({
     id: chatId,
     messages: initialMessages,
     transport,
@@ -126,6 +126,29 @@ function Conversation({
       }
     },
   })
+
+  // Cross-tab sync: this shares the cache with ChatView's query, so when a
+  // realtime broadcast invalidates messageKeys.list(chatId) it refetches here.
+  const { data: syncedMessages } = useQuery({
+    queryKey: messageKeys.list(chatId),
+    queryFn: () => fetchMessages(chatId),
+    staleTime: Infinity,
+  })
+
+  // Read status through a ref so the sync effect only fires when the server
+  // data actually changes — not on every status transition (which could wipe
+  // the freshly streamed reply before the refetch resolves).
+  const statusRef = useRef(status)
+  statusRef.current = status
+
+  useEffect(() => {
+    if (!syncedMessages) return
+    // Never overwrite an in-flight stream in the tab that's generating it.
+    if (statusRef.current === "streaming" || statusRef.current === "submitted") {
+      return
+    }
+    setMessages(syncedMessages.map(toUIMessage))
+  }, [syncedMessages, setMessages])
 
   const atFreeLimit = usage?.isAnonymous === true && usage.remaining <= 0
   const isBusy = status === "submitted" || status === "streaming"

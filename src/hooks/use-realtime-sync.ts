@@ -4,7 +4,10 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { realtimeClient } from "@/lib/supabase/realtime";
 import { chatKeys } from "@/lib/api/chats";
+import { messageKeys } from "@/lib/api/messages";
 import { useAuth } from "@/providers/auth-provider";
+
+type BroadcastPayload = { type: string; chatId?: string };
 
 /**
  * Subscribes to the per-user Supabase Realtime Broadcast channel and
@@ -26,8 +29,16 @@ export function useRealtimeSync() {
       .on("broadcast", { event: "chat.created" }, () => {
         queryClient.invalidateQueries({ queryKey: chatKeys.list() });
       })
-      .on("broadcast", { event: "chat.updated" }, () => {
+      .on("broadcast", { event: "chat.updated" }, ({ payload }) => {
+        // A chat gained new messages (or a title) — refresh both the sidebar
+        // ordering and the open conversation's message history.
         queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+        const chatId = (payload as BroadcastPayload)?.chatId;
+        if (chatId) {
+          queryClient.invalidateQueries({
+            queryKey: messageKeys.list(chatId),
+          });
+        }
       })
       .on("broadcast", { event: "chat.deleted" }, () => {
         queryClient.invalidateQueries({ queryKey: chatKeys.list() });
