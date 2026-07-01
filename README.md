@@ -1,15 +1,18 @@
 # Chatbot
 
-A ChatGPT-style AI chatbot with streaming responses, conversation history, image support, and anonymous access.
+A ChatGPT-style AI chatbot: send messages and stream responses in real time, keep a searchable history of conversations, attach images, and try it anonymously before signing in. Built with Next.js, Google Gemini, and Supabase.
+
+> Live demo: _add your Vercel URL here after deploying_
 
 ## Features
 
-- Stream responses from OpenAI `gpt-4o` to the client in real time
-- Left sidebar with persistent chat history (per user)
-- Email/password and OAuth sign-in (Google, GitHub) via Supabase Auth
-- Paste or attach images — answered by GPT-4o vision
-- Anonymous access for up to 3 free questions before prompting sign-up
-- New chats sync across open browser tabs via Supabase Realtime
+- **Streaming chat** — messages stream token-by-token from Google Gemini via the Vercel AI SDK, with a stop button and typing indicator.
+- **Persistent chat history** — left sidebar lists your conversations (create, rename, delete, search), stored in Postgres.
+- **Authentication** — email/password plus Google and GitHub OAuth, via Supabase Auth.
+- **Anonymous access** — try up to 3 free questions with no account, then a prompt to sign up. Upgrading keeps your existing chats.
+- **Image attachments** — paste, drag, or pick images and ask about them (Gemini vision). Images persist across reloads.
+- **Cross-tab sync** — creating, renaming, or deleting a chat in one tab updates all other open tabs in real time (Supabase Realtime).
+- **Polished UX** — Markdown + syntax-highlighted code with copy buttons, auto-scroll, dark mode, and loading/empty/error states.
 
 ## Tech stack
 
@@ -17,120 +20,134 @@ A ChatGPT-style AI chatbot with streaming responses, conversation history, image
 |---|---|
 | Framework | Next.js (App Router, TypeScript) |
 | UI | shadcn/ui + Tailwind CSS |
-| LLM | OpenAI `gpt-4o` via Vercel AI SDK v5 |
 | Data fetching | TanStack Query |
-| Database | Supabase Postgres (service-role, server-only) |
+| LLM | Google Gemini via the Vercel AI SDK v5 |
+| Server | Next.js REST route handlers (`src/app/api/*`) |
+| Database | Supabase Postgres (accessed server-side only, via the service-role key) |
 | Auth | Supabase Auth (`@supabase/ssr`) |
 | Realtime | Supabase Realtime (Broadcast) |
 | Deployment | Vercel + Supabase cloud |
+
+## Architecture
+
+The codebase keeps the three layers strictly separate, per the project brief:
+
+```
+Client components ──fetch──▶ REST API routes ──▶ DB data-access layer ──▶ Supabase Postgres
+(TanStack Query,            (src/app/api/*)      (src/lib/db/*,
+ useChat)                                         service-role, server-only)
+```
+
+- **No DB calls in components** (including Server Components). Components only call `/api/*`.
+- **All DB access uses the Supabase service-role client**, isolated in `server-only` files. There is no public DB client and no RLS reliance.
+- **Auth identity** is read from the request cookie via `@supabase/ssr` (auth only), and every query is scoped to that `userId`.
+- The **public anon key** is used only client-side for Supabase Realtime (Broadcast) — the one place the brief allows it.
+- Secrets (`GOOGLE_GENERATIVE_AI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are never prefixed with `NEXT_PUBLIC_`.
+
+## API endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` / `POST` | `/api/chats` | List / create chats |
+| `GET` / `PATCH` / `DELETE` | `/api/chats/[chatId]` | Fetch / rename / delete a chat |
+| `GET` | `/api/chats/[chatId]/messages` | Load a chat's message history |
+| `GET` | `/api/chats/search?q=` | Search chats by title |
+| `POST` | `/api/chat` | Stream an assistant response and persist messages |
+| `POST` | `/api/uploads` | Upload an image to Storage, return a signed URL |
+| `GET` | `/api/usage` | Anonymous free-question count remaining |
+
+All routes are auth-guarded and scoped to the signed-in (or anonymous) user.
 
 ## Getting started
 
 ### Prerequisites
 
 - Node.js 18+
-- A [Supabase](https://supabase.com) project
-- An [OpenAI](https://platform.openai.com) API key
+- A free [Supabase](https://supabase.com) project
+- A [Google Gemini API key](https://aistudio.google.com/apikey) (free tier is enough for the demo)
 
-### Local setup
+### 1. Install
 
-1. **Clone the repository**
+```bash
+git clone git@github.com:purpleow1/Chatbot.git
+cd Chatbot
+npm install
+```
 
-   ```bash
-   git clone https://github.com/your-username/chatbot.git
-   cd chatbot
-   ```
+### 2. Configure environment variables
 
-2. **Install dependencies**
+```bash
+cp .env.example .env.local
+```
 
-   ```bash
-   npm install
-   ```
+Fill in `.env.local`:
 
-3. **Configure environment variables**
+| Variable | Where to find it |
+|---|---|
+| `GOOGLE_GENERATIVE_AI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| `SUPABASE_URL` | Supabase Dashboard → Project Settings → Data API |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase Dashboard → Project Settings → API Keys (**secret** — server-only) |
+| `NEXT_PUBLIC_SUPABASE_URL` | Same as `SUPABASE_URL` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase Dashboard → Project Settings → API Keys (publishable/anon) |
 
-   ```bash
-   cp .env.example .env.local
-   ```
+### 3. Set up Supabase
 
-   Fill in the values in `.env.local`:
+1. **Run the migrations.** Open the Supabase **SQL Editor** and run each file in `supabase/migrations/` in filename order (or use `supabase db push` if you have the CLI linked).
+2. **Create the Storage bucket.** Storage → New bucket → name it `attachments`, and keep **Public bucket unchecked** (images are served via signed URLs).
+3. **Enable anonymous sign-ins.** Authentication → Sign In / Providers → enable **Anonymous Sign-ins**.
+4. **(Optional) Enable Google / GitHub OAuth.** See below.
 
-   | Variable | Where to find it |
-   |---|---|
-   | `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-   | `SUPABASE_URL` | Supabase Dashboard → Project Settings → API |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Dashboard → Project Settings → API |
-   | `NEXT_PUBLIC_SUPABASE_URL` | Same as `SUPABASE_URL` |
-   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase Dashboard → Project Settings → API |
+### 4. Run
 
-4. **Apply database migrations**
+```bash
+npm run dev
+```
 
-   Open the [Supabase SQL Editor](https://supabase.com/dashboard/project/_/sql) for your project, paste the contents of `supabase/migrations/20260630000000_initial_schema.sql`, and run it.
-
-   Alternatively, use the Supabase CLI (requires `supabase` CLI installed and project linked):
-
-   ```bash
-   supabase db push
-   ```
-
-   After running the migration:
-   - Enable **Anonymous Sign-Ins** in your Supabase project: Authentication → Settings → Enable Anonymous Sign-ins.
-   - Create a private Storage bucket named `attachments`: Storage → New bucket → name `attachments`, uncheck "Public bucket".
-
-5. **Run the development server**
-
-   ```bash
-   npm run dev
-   ```
-
-   Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000).
 
 ### OAuth setup (Google / GitHub)
 
-Configure redirect URLs in your Supabase Auth settings:
+In the Supabase dashboard → Authentication:
 
-- **Site URL**: `http://localhost:3000` (dev) / `https://your-app.vercel.app` (prod)
-- **Redirect URL**: `http://localhost:3000/auth/callback`
+- **URL Configuration** → set **Site URL** to `http://localhost:3000` (and add your Vercel URL for production), and add `http://localhost:3000/auth/callback` (+ the production equivalent) to **Redirect URLs**.
+- **Sign In / Providers** → enable **Google** and/or **GitHub** and paste each provider's Client ID + Secret.
+- In the provider's own console (Google Cloud Console / GitHub Developer Settings), set the authorized callback to `https://<your-project-ref>.supabase.co/auth/v1/callback`.
 
-Then add your OAuth app credentials (Client ID + Secret) in Supabase → Auth → Providers.
+## Deployment (Vercel)
+
+1. Push this repo to GitHub, then in Vercel: **Add New → Project → Import** the repo (framework auto-detects as Next.js).
+2. Add the five environment variables from `.env.example` in **Settings → Environment Variables** (Production + Preview).
+3. Deploy, then add the resulting `https://<app>.vercel.app` URL to Supabase → Authentication → URL Configuration (Site URL + Redirect URLs) so OAuth works in production.
 
 ## Project structure
 
 ```
 src/
   app/
-    (auth)/          # login, signup pages
-    (chat)/          # chat UI (sidebar + message area)
-    api/             # REST route handlers (chats, messages, streaming, uploads)
-    auth/callback/   # OAuth callback
+    (auth)/          login, signup pages
+    (chat)/          chat UI (sidebar + message area, /c/[chatId])
+    api/             REST route handlers (chats, messages, chat stream, uploads, usage)
+    auth/callback/   OAuth callback
   components/
-    chat/            # chat-specific components
-    ui/              # shadcn primitives
+    chat/            chat-specific components
+    ui/              shadcn primitives
   lib/
-    supabase/        # admin (server-only), ssr auth, realtime clients
-    db/              # data-access repositories (server-only)
-    api/             # client-side fetchers + TanStack Query keys
-  providers/         # QueryProvider
+    ai/              Gemini model + title generation (server-only)
+    supabase/        admin (server-only), ssr auth, realtime clients
+    db/              data-access repositories (server-only)
+    api/             client-side fetchers + TanStack Query keys
+    realtime/        broadcast helper
+  providers/         TanStack Query provider
 supabase/
-  migrations/        # SQL migration files
+  migrations/        SQL migration files
 ```
 
 ## Scripts
 
 | Command | Description |
 |---|---|
-| `npm run dev` | Start development server |
+| `npm run dev` | Start the development server |
 | `npm run build` | Production build |
-| `npm run start` | Run production build locally |
+| `npm run start` | Run the production build locally |
 | `npm run lint` | ESLint |
-| `npm run format` | Prettier format |
-
-## Deployment
-
-Deploy to Vercel with one click or via the CLI:
-
-```bash
-npx vercel --prod
-```
-
-Set the same environment variables from `.env.example` in Vercel → Project → Settings → Environment Variables.
+| `npm run format` | Prettier |
