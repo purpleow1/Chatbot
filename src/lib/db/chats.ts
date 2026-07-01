@@ -81,6 +81,26 @@ export async function deleteAllChats(userId: string): Promise<void> {
   if (error) throw error;
 }
 
+export interface ChatSearchResult {
+  id: string;
+  title: string | null;
+  updated_at: string;
+  snippet: string | null;
+}
+
+/** Search chats by title and message content for the given user. */
+export async function searchChats(
+  userId: string,
+  query: string,
+): Promise<ChatSearchResult[]> {
+  const { data, error } = await adminClient.rpc("search_chats", {
+    p_user_id: userId,
+    p_query: query,
+  });
+  if (error) throw error;
+  return (data ?? []) as ChatSearchResult[];
+}
+
 /** Bump updated_at so the chat floats to the top of the sidebar. */
 export async function touchChat(id: string): Promise<void> {
   const { error } = await adminClient

@@ -2,45 +2,46 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { Dialog } from "@base-ui/react/dialog"
 import { MessageSquare, Search, SquarePen } from "lucide-react"
-import { chatKeys, createChat, fetchChats } from "@/lib/api/chats"
+import { chatKeys, fetchChats, searchChats } from "@/lib/api/chats"
 import { useAuth } from "@/providers/auth-provider"
+import { useDebounce } from "@/hooks/use-debounce"
 
 interface SearchDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-/** Command-palette-style modal for finding and jumping to a chat by title. */
+/** Command-palette-style modal for finding and jumping to a chat. */
 export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   const router = useRouter()
-  const queryClient = useQueryClient()
   const { user } = useAuth()
   const [query, setQuery] = useState("")
+  const debouncedQuery = useDebounce(query, 300)
 
+  // Pre-fetch the chat list so the unfiltered state renders instantly.
   const { data: chats } = useQuery({
     queryKey: chatKeys.list(),
     queryFn: fetchChats,
     enabled: !!user,
   })
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const list = chats ?? []
-    if (!q) return list
-    return list.filter((c) => (c.title ?? "New Chat").toLowerCase().includes(q))
-  }, [chats, query])
-
-  const createMutation = useMutation({
-    mutationFn: () => createChat(),
-    onSuccess: (chat) => {
-      queryClient.invalidateQueries({ queryKey: chatKeys.list() })
-      router.push(`/c/${chat.id}`)
-      close()
-    },
+  // Use DB search when there's a non-empty query, otherwise show all chats.
+  const { data: searchResults, isFetching: isSearching } = useQuery({
+    queryKey: ["chats", "search", debouncedQuery],
+    queryFn: () => searchChats(debouncedQuery),
+    enabled: !!user && debouncedQuery.length > 0,
+    staleTime: 10_000,
   })
+
+  const displayed = useMemo(() => {
+    if (!debouncedQuery) {
+      return (chats ?? []).map((c) => ({ id: c.id, title: c.title, snippet: null }))
+    }
+    return searchResults ?? []
+  }, [debouncedQuery, chats, searchResults])
 
   function close() {
     onOpenChange(false)
@@ -49,6 +50,11 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
 
   function goToChat(id: string) {
     router.push(`/c/${id}`)
+    close()
+  }
+
+  function newChat() {
+    router.push("/")
     close()
   }
 
@@ -76,23 +82,25 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
               aria-label="Search chats"
               className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
+            {isSearching && (
+              <span className="size-3.5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+            )}
           </div>
 
           {/* Results */}
           <div className="max-h-80 overflow-y-auto p-1.5">
             <button
               type="button"
-              onClick={() => createMutation.mutate()}
-              disabled={createMutation.isPending}
-              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+              onClick={newChat}
+              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
             >
               <SquarePen className="size-4 shrink-0 text-muted-foreground" />
               New chat
             </button>
 
-            {filtered.length > 0 && (
+            {displayed.length > 0 && (
               <div className="mt-1 border-t pt-1">
-                {filtered.map((chat) => (
+                {displayed.map((chat) => (
                   <button
                     key={chat.id}
                     type="button"
@@ -100,15 +108,22 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
                     className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
                   >
                     <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{chat.title ?? "New Chat"}</span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate">{chat.title ?? "New Chat"}</span>
+                      {chat.snippet && (
+                        <span className="truncate text-xs text-muted-foreground">
+                          {chat.snippet}
+                        </span>
+                      )}
+                    </span>
                   </button>
                 ))}
               </div>
             )}
 
-            {chats && chats.length > 0 && filtered.length === 0 && (
+            {debouncedQuery && !isSearching && displayed.length === 0 && (
               <p className="px-2.5 py-6 text-center text-sm text-muted-foreground">
-                No chats match “{query}”.
+                No chats match &ldquo;{debouncedQuery}&rdquo;.
               </p>
             )}
           </div>

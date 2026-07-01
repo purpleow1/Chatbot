@@ -1,4 +1,7 @@
 import type { Chat } from "@/lib/db/types"
+import type { ChatSearchResult } from "@/lib/db/chats"
+
+export type { ChatSearchResult }
 
 export const chatKeys = {
   all: ["chats"] as const,
@@ -40,4 +43,10 @@ export async function removeChatById(id: string): Promise<void> {
 export async function clearAllChats(): Promise<void> {
   const res = await fetch("/api/chats", { method: "DELETE" })
   if (!res.ok) throw new Error("Failed to clear chats")
+}
+
+export async function searchChats(q: string): Promise<ChatSearchResult[]> {
+  const res = await fetch(`/api/chats/search?q=${encodeURIComponent(q)}`)
+  if (!res.ok) throw new Error("Search failed")
+  return res.json()
 }
