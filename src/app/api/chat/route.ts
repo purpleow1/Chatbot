@@ -1,4 +1,10 @@
-import { convertToModelMessages, streamText, type UIMessage } from "ai";
+import {
+  APICallError,
+  convertToModelMessages,
+  RetryError,
+  streamText,
+  type UIMessage,
+} from "ai";
 import { requireAuth } from "@/lib/auth/get-user";
 import { chatModel, SYSTEM_PROMPT, generateChatTitle } from "@/lib/ai/model";
 import { getChatById, touchChat, updateChat } from "@/lib/db/chats";
@@ -32,6 +38,37 @@ function plainText(message: UIMessage): string {
     .map((p) => p.text)
     .join("\n")
     .trim();
+}
+
+/**
+ * Turns a streaming/provider error into a message safe to send to the client.
+ * In development we expose the underlying reason (invalid API key, quota, etc.)
+ * so the chat UI shows something actionable instead of "An error occurred.".
+ * In production we keep it generic to avoid leaking server details.
+ */
+function errorToClientMessage(error: unknown): string {
+  // streamText wraps provider failures in a RetryError after exhausting
+  // retries; unwrap it to inspect the underlying API error (e.g. HTTP 429).
+  const apiError = RetryError.isInstance(error)
+    ? error.lastError
+    : error;
+
+  // Rate limit / quota exhaustion (HTTP 429) is worth calling out explicitly
+  // regardless of environment, since it's a common, actionable condition.
+  if (APICallError.isInstance(apiError) && apiError.statusCode === 429) {
+    return "The AI model's rate limit or quota has been reached. Please wait a moment and try again.";
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return "Something went wrong while generating a response. Please try again.";
+  }
+
+  if (APICallError.isInstance(apiError)) {
+    const status = apiError.statusCode ? ` (HTTP ${apiError.statusCode})` : "";
+    return `AI provider request failed${status}: ${apiError.message}`;
+  }
+  if (error instanceof Error) return error.message;
+  return typeof error === "string" ? error : "Unknown error";
 }
 
 export async function POST(request: Request) {
@@ -122,9 +159,18 @@ export async function POST(request: Request) {
     model: chatModel,
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
+    onError: ({ error }) => {
+      // Log the *real* provider error server-side; the client stream only ever
+      // sees the (optionally masked) string returned by onError below.
+      console.error("[api/chat] streamText error:", error);
+    },
   });
 
   return stream.toUIMessageStreamResponse({
+    // By default the AI SDK returns "An error occurred." to avoid leaking
+    // server details. Surface the actual reason so failures are debuggable
+    // (full detail in development, a generic message in production).
+    onError: (error) => errorToClientMessage(error),
     onFinish: async ({ responseMessage, isAborted }) => {
       try {
         // Persist the assistant reply (text parts only; no attachments on assistant side).

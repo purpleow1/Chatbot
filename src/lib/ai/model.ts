@@ -10,8 +10,15 @@ if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
   );
 }
 
-/** Default Gemini model used for chat + (later) vision. Free-tier friendly. */
-export const CHAT_MODEL_ID = "gemini-2.5-flash";
+/**
+ * Gemini model used for chat + (later) vision.
+ *
+ * Options are listed from most capable (top) to lightest (low). Each model has
+ * its own free-tier daily request budget, so switching is an easy way to work
+ * around a per-model quota (HTTP 429). Uncomment exactly one.
+ */
+// export const CHAT_MODEL_ID = "gemini-2.5-flash"; // hit free-tier daily quota (20 req/day)
+export const CHAT_MODEL_ID = "gemini-2.5-flash-lite";
 
 export const chatModel = google(CHAT_MODEL_ID);
 

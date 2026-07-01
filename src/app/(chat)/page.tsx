@@ -10,13 +10,6 @@ import { Composer, type ComposerSubmitPayload } from "@/components/chat/composer
 import { useUpgrade } from "@/components/chat/upgrade"
 import type { Chat } from "@/lib/db/types"
 
-const SUGGESTIONS = [
-  "Explain a concept in simple terms",
-  "Draft a professional email",
-  "Help me debug some code",
-  "Brainstorm ideas for a project",
-]
-
 export default function HomePage() {
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -70,22 +63,6 @@ export default function HomePage() {
         autoFocus
         placeholder="Message the assistant…"
       />
-
-      <div className="mt-4 flex flex-wrap justify-center gap-2">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            disabled={createMutation.isPending}
-            onClick={() =>
-              handleSend({ text: s, files: [], attachments: [] })
-            }
-            className="rounded-full border bg-background px-3.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
-          >
-            {s}
-          </button>
-        ))}
-      </div>
     </div>
   )
 }

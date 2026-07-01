@@ -169,7 +169,8 @@ function Conversation({
 
           {error && (
             <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-              Something went wrong generating a response. Please try again.
+              {error.message ||
+                "Something went wrong generating a response. Please try again."}
             </div>
           )}
 
