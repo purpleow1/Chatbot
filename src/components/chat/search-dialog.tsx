@@ -9,6 +9,38 @@ import { chatKeys, fetchChats, searchChats } from "@/lib/api/chats"
 import { useAuth } from "@/providers/auth-provider"
 import { useDebounce } from "@/hooks/use-debounce"
 
+/**
+ * Returns a short excerpt of `text` centered around the first occurrence of
+ * `query` so the match is always visible regardless of where it falls.
+ */
+function excerptAround(text: string, query: string, context = 60): string {
+  const idx = text.toLowerCase().indexOf(query.toLowerCase())
+  if (idx === -1) return text.slice(0, context * 2)
+  const start = Math.max(0, idx - context)
+  const end = Math.min(text.length, idx + query.length + context)
+  return (start > 0 ? "…" : "") + text.slice(start, end) + (end < text.length ? "…" : "")
+}
+
+function Highlight({ text, query }: { text: string; query: string }) {
+  if (!query) return <>{text}</>
+  const excerpt = excerptAround(text, query)
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const parts = excerpt.split(new RegExp(`(${escaped})`, "gi"))
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} className="rounded-sm bg-yellow-200 text-yellow-900 dark:bg-yellow-700 dark:text-yellow-100">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  )
+}
+
 interface SearchDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -109,10 +141,12 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
                   >
                     <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
                     <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate">{chat.title ?? "New Chat"}</span>
+                      <span className="truncate">
+                        <Highlight text={chat.title ?? "New Chat"} query={debouncedQuery} />
+                      </span>
                       {chat.snippet && (
-                        <span className="truncate text-xs text-muted-foreground">
-                          {chat.snippet}
+                        <span className="text-xs text-muted-foreground">
+                          <Highlight text={chat.snippet} query={debouncedQuery} />
                         </span>
                       )}
                     </span>
