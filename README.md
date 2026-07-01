@@ -119,6 +119,43 @@ Client components ──fetch──▶ REST API routes ──▶ DB data-access 
 
 All routes are auth-guarded and scoped to the signed-in (or anonymous) user.
 
+## Database design
+
+Postgres on Supabase. All tables live in `public`; the app reads and writes them exclusively through the service-role admin client (no RLS policies — authorization is enforced in the API layer). Full SQL is in `supabase/migrations/`.
+
+**Design choices**
+
+- **User-scoped ownership** — chats, attachments, documents, and chunks carry `user_id`; messages are scoped via `chat_id` → `chats.user_id`. Every API query filters on the authenticated user.
+- **Normalized core, flexible messages** — chats and messages are relational; message content lives in a `jsonb` `parts` column (AI SDK shape: text, file, document chip) so we avoid a parts sub-table while still supporting search over text parts.
+- **Chat-scoped RAG** — documents and embeddings belong to a chat, not a global library, keeping retrieval simple and bounded.
+- **Cascade deletes in Postgres** — deleting a user, chat, message, or document removes dependent rows via FK `on delete cascade`. Storage bucket objects are removed explicitly in the API layer (Postgres does not manage Storage).
+- **Service-role-only DML** — table grants are limited to `service_role`; `anon`/`authenticated` roles have no direct table access, so the publishable key cannot read or write app data.
+
+### Tables
+
+| Table | Purpose | Key relationships |
+|---|---|---|
+| `users` | App profile mirror of `auth.users` (`is_anonymous` for the 3-question limit) | PK = `auth.users.id` |
+| `chats` | Conversation metadata and title | `user_id` → `users` |
+| `messages` | Ordered message history | `chat_id` → `chats`; `parts` jsonb |
+| `attachments` | Image metadata (binary in Storage `attachments` bucket) | `message_id` → `messages`; denormalized `chat_id`, `user_id` |
+| `usages` | Anonymous message counter (one row per user) | PK = `user_id` |
+| `documents` | Uploaded file metadata and ingestion status | `chat_id`, `user_id`; binary in Storage `documents` bucket |
+| `document_chunks` | Text chunks + 768-dim embeddings (`pgvector`) | `document_id` → `documents`; denormalized `chat_id`, `user_id` |
+
+### Indexes and functions
+
+| Name | Why |
+|---|---|
+| `idx_chats_user_updated` | Sidebar: list a user's chats by most recently active |
+| `idx_messages_chat_created` | Load message history in insertion order |
+| `idx_documents_chat_created` | List documents for a chat, newest first |
+| `idx_document_chunks_embedding` (HNSW) | Fast cosine-similarity search for RAG retrieval |
+| `idx_document_chunks_chat` | Scope chunk retrieval to a chat |
+| `increment_anon_count()` | Atomic upsert for the anonymous usage limit |
+| `search_chats()` | Title + message text search, user-scoped, capped at 20 results |
+| `match_document_chunks()` | Top-k chunk retrieval over a chat's ready documents |
+
 ## Deployment (Vercel)
 
 1. Push this repo to GitHub, then in Vercel: **Add New → Project → Import** the repo (framework auto-detects as Next.js).

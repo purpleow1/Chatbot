@@ -14,8 +14,18 @@ export type MessageRole = "user" | "assistant" | "system";
 export type MessagePart =
   | { type: "text"; text: string }
   | { type: "file"; url: string; mediaType: string; filename?: string }
+  // UI-only chip for a document attached to a chat as RAG context. Rendered in
+  // the message thread but never sent to the model (the model gets retrieved
+  // chunks via the system prompt instead).
+  | { type: "data-document"; data: DocumentPartData }
   | { type: "tool-invocation"; toolInvocationId: string; toolName: string; args: unknown; result?: unknown; state: string }
   | { type: "tool-result"; toolCallId: string; toolName: string; result: unknown };
+
+export interface DocumentPartData {
+  filename: string;
+  mediaType: string;
+  sizeBytes: number;
+}
 
 export interface User {
   id: string;

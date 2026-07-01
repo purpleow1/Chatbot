@@ -1,6 +1,7 @@
 "use client"
 
 import type { UIMessage } from "ai"
+import { FileText } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Markdown } from "./markdown"
 import { CopyButton } from "./copy-button"
@@ -13,6 +14,10 @@ function messageText(message: UIMessage): string {
 }
 
 type FilePart = { type: "file"; url: string; mediaType: string; filename?: string }
+type DocumentPart = {
+  type: "data-document"
+  data: { filename: string; mediaType: string; sizeBytes: number }
+}
 
 function isImageFilePart(part: UIMessage["parts"][number]): part is FilePart {
   return (
@@ -22,15 +27,37 @@ function isImageFilePart(part: UIMessage["parts"][number]): part is FilePart {
   )
 }
 
+function isDocumentPart(part: UIMessage["parts"][number]): part is DocumentPart {
+  return part.type === "data-document"
+}
+
+function DocumentChips({ parts }: { parts: DocumentPart[] }) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {parts.map((part, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-1.5 rounded-lg border bg-muted/60 px-2.5 py-1.5 text-xs text-foreground/80"
+        >
+          <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="max-w-[12rem] truncate">{part.data.filename}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function MessageBubble({ message }: { message: UIMessage }) {
   const isUser = message.role === "user"
   const text = messageText(message)
   const imageParts = message.parts.filter(isImageFilePart)
+  const documentParts = message.parts.filter(isDocumentPart)
 
   if (isUser) {
     return (
       <div className="group/msg flex w-full animate-in fade-in slide-in-from-bottom-1 justify-end duration-300">
         <div className="flex max-w-[85%] flex-col items-end gap-1">
+          {documentParts.length > 0 && <DocumentChips parts={documentParts} />}
           <div className="overflow-hidden rounded-2xl bg-primary text-sm text-primary-foreground">
             {imageParts.length > 0 && (
               <div className={cn("flex flex-wrap gap-1", text ? "p-1 pb-0" : "p-1")}>

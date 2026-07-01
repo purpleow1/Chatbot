@@ -1,5 +1,17 @@
 import type { Document } from "@/lib/db/types";
 
+/**
+ * A ready document referenced by an outgoing message. Sent to `/api/chat` so
+ * the server can persist a UI-only document chip on the user message, and used
+ * to build the live `data-document` message part for immediate rendering.
+ */
+export type DocumentAttachmentInput = {
+  documentId: string;
+  filename: string;
+  mediaType: string;
+  sizeBytes: number;
+};
+
 export const documentKeys = {
   all: ["documents"] as const,
   list: (chatId: string) => [...documentKeys.all, chatId] as const,

@@ -26,6 +26,12 @@ type AttachmentInput = {
   sizeBytes: number;
   filename?: string;
 };
+type DocumentInput = {
+  documentId: string;
+  filename: string;
+  mediaType: string;
+  sizeBytes: number;
+};
 
 /** Extract text parts from an AI SDK UIMessage. */
 function toTextParts(message: UIMessage): TextPart[] {
@@ -81,6 +87,7 @@ export async function POST(request: Request) {
     chatId?: string;
     messages?: UIMessage[];
     attachments?: AttachmentInput[];
+    documents?: DocumentInput[];
   };
   try {
     body = await request.json();
@@ -88,7 +95,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { chatId, messages, attachments = [] } = body;
+  const { chatId, messages, attachments = [], documents = [] } = body;
   if (!chatId || !Array.isArray(messages)) {
     return Response.json(
       { error: "chatId and messages are required" },
@@ -140,7 +147,18 @@ export async function POST(request: Request) {
       filename: attachments[i]?.filename ?? p.filename,
     }));
 
-    const allParts: MessagePart[] = [...textParts, ...fileParts];
+    // UI-only chips for attached documents (rendered in the thread on reload;
+    // never sent to the model — retrieval supplies the content instead).
+    const documentParts: MessagePart[] = documents.map((d) => ({
+      type: "data-document",
+      data: {
+        filename: d.filename,
+        mediaType: d.mediaType,
+        sizeBytes: d.sizeBytes,
+      },
+    }));
+
+    const allParts: MessagePart[] = [...textParts, ...fileParts, ...documentParts];
     if (allParts.length > 0) {
       const saved = await createMessage({ chatId, role: "user", parts: allParts });
       savedUserMessageId = saved.id;
@@ -167,10 +185,19 @@ export async function POST(request: Request) {
     ? `${SYSTEM_PROMPT}\n\n${documentContext}`
     : SYSTEM_PROMPT;
 
+  // Drop UI-only parts (e.g. `data-document` chips) before converting to model
+  // messages so the model never receives them — RAG context covers documents.
+  const modelMessages = messages.map((m) => ({
+    ...m,
+    parts: m.parts.filter(
+      (p) => !(typeof p.type === "string" && p.type.startsWith("data-")),
+    ),
+  }));
+
   const stream = streamText({
     model: chatModel,
     system,
-    messages: await convertToModelMessages(messages),
+    messages: await convertToModelMessages(modelMessages),
     onError: ({ error }) => {
       // Log the *real* provider error server-side; the client stream only ever
       // sees the (optionally masked) string returned by onError below.

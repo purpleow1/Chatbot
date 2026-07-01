@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { FileUIPart } from "ai"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, ArrowUp, FileText, Paperclip, Square, X } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -18,18 +17,17 @@ import {
   ACCEPTED_DOCUMENT_EXTENSIONS,
   MAX_DOCUMENT_SIZE,
   deleteDocument,
-  documentKeys,
-  fetchDocuments,
   isAcceptedDocument,
   uploadDocument,
+  type DocumentAttachmentInput,
 } from "@/lib/api/documents"
 import type { PendingDraft } from "@/lib/pending-draft"
-import type { Document } from "@/lib/db/types"
 
 export interface ComposerSubmitPayload {
   text: string
   files: FileUIPart[]
   attachments: AttachmentInput[]
+  documents?: DocumentAttachmentInput[]
 }
 
 interface ComposerProps {
@@ -67,8 +65,21 @@ type PendingAttachment = {
   | { status: "ready"; result: UploadResult }
 )
 
-/** A document currently uploading/ingesting (not yet in the server list). */
-type PendingDoc = { key: string; filename: string }
+/**
+ * A document attached to the current, not-yet-sent message. It's uploaded +
+ * ingested immediately (so RAG context is ready), then attached to the message
+ * on send and cleared from the composer — it does not linger in the input.
+ */
+type AttachedDoc = {
+  key: string
+  filename: string
+  mediaType: string
+  sizeBytes: number
+} & (
+  | { status: "uploading" }
+  | { status: "error"; errorMessage: string }
+  | { status: "ready"; documentId: string }
+)
 
 const isImageFile = (f: File) =>
   (ALLOWED_IMAGE_TYPES as readonly string[]).includes(f.type)
@@ -96,40 +107,19 @@ export function Composer({
   initialDocumentFiles,
   onNeedChatForDocuments,
 }: ComposerProps) {
-  const queryClient = useQueryClient()
   const [input, setInput] = useState(initialText ?? "")
   const [pendingImages, setPendingImages] = useState<PendingAttachment[]>(() =>
     (initialImageAttachments ?? []).map(readyAttachmentFromResult),
   )
-  const [pendingDocs, setPendingDocs] = useState<PendingDoc[]>([])
+  const [attachedDocs, setAttachedDocs] = useState<AttachedDoc[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const isUploadingImages = pendingImages.some((a) => a.status === "uploading")
-  const hasUploadErrors = pendingImages.some((a) => a.status === "error")
-  const isProcessingDocs = pendingDocs.length > 0
-
-  // A chat's persisted documents (available as RAG context). Home screen has
-  // no chat yet, so the query stays disabled there.
-  const { data: serverDocs = [] } = useQuery({
-    queryKey: chatId ? documentKeys.list(chatId) : documentKeys.list("none"),
-    queryFn: () => fetchDocuments(chatId as string),
-    enabled: !!chatId,
-    staleTime: 30_000,
-  })
-
-  const removeDoc = useMutation({
-    mutationFn: (documentId: string) => deleteDocument(documentId),
-    onSuccess: () => {
-      if (chatId) {
-        queryClient.invalidateQueries({ queryKey: documentKeys.list(chatId) })
-      }
-    },
-    onError: () => {
-      toast.error("Couldn't remove document", { description: "Please try again." })
-    },
-  })
+  const hasImageErrors = pendingImages.some((a) => a.status === "error")
+  const isUploadingDocs = attachedDocs.some((d) => d.status === "uploading")
+  const isUploading = isUploadingImages || isUploadingDocs
 
   useEffect(() => {
     if (autoFocus) textareaRef.current?.focus()
@@ -235,25 +225,43 @@ export function Composer({
       await Promise.all(
         valid.map(async (file) => {
           const key = `${Date.now()}-${Math.random()}`
-          setPendingDocs((prev) => [...prev, { key, filename: file.name }])
+          setAttachedDocs((prev) => [
+            ...prev,
+            {
+              key,
+              filename: file.name,
+              mediaType: file.type,
+              sizeBytes: file.size,
+              status: "uploading",
+            },
+          ])
           try {
-            await uploadDocument(chatId, file)
-            await queryClient.invalidateQueries({
-              queryKey: documentKeys.list(chatId),
-            })
+            const doc = await uploadDocument(chatId, file)
+            setAttachedDocs((prev) =>
+              prev.map((d) =>
+                d.key === key
+                  ? { ...d, status: "ready", documentId: doc.id }
+                  : d,
+              ),
+            )
             toast.success("Document ready", {
               description: `${file.name} is now available as context.`,
             })
           } catch (err) {
             const message = err instanceof Error ? err.message : "Upload failed"
             toast.error("Couldn't add document", { description: message })
-          } finally {
-            setPendingDocs((prev) => prev.filter((p) => p.key !== key))
+            setAttachedDocs((prev) =>
+              prev.map((d) =>
+                d.key === key
+                  ? { ...d, status: "error", errorMessage: message }
+                  : d,
+              ),
+            )
           }
         }),
       )
     },
-    [chatId, input, pendingImages, onNeedChatForDocuments, queryClient],
+    [chatId, input, pendingImages, onNeedChatForDocuments],
   )
 
   // Upload any documents handed off from the home screen once, on mount.
@@ -282,6 +290,21 @@ export function Composer({
       const removed = prev.find((a) => a.key === key)
       if (removed) URL.revokeObjectURL(removed.previewUrl)
       return prev.filter((a) => a.key !== key)
+    })
+  }, [])
+
+  const removeDoc = useCallback((key: string) => {
+    setAttachedDocs((prev) => {
+      const removed = prev.find((d) => d.key === key)
+      // Deleting a ready doc also removes its chunks so it stops being context.
+      if (removed?.status === "ready") {
+        void deleteDocument(removed.documentId).catch(() => {
+          toast.error("Couldn't remove document", {
+            description: "It may still be used as context.",
+          })
+        })
+      }
+      return prev.filter((d) => d.key !== key)
     })
   }, [])
 
@@ -317,8 +340,7 @@ export function Composer({
         a.status === "ready",
     )
 
-    if ((!text && readyAttachments.length === 0) || isBusy) return
-    if (isUploadingImages || isProcessingDocs) return
+    if ((!text && readyAttachments.length === 0) || isBusy || isUploading) return
     if (atFreeLimit) {
       onBlocked?.()
       return
@@ -338,11 +360,24 @@ export function Composer({
       ...(a.result.filename ? { filename: a.result.filename } : {}),
     }))
 
-    onSend({ text, files, attachments })
+    const documents: DocumentAttachmentInput[] = attachedDocs
+      .filter(
+        (d): d is AttachedDoc & { status: "ready"; documentId: string } =>
+          d.status === "ready",
+      )
+      .map((d) => ({
+        documentId: d.documentId,
+        filename: d.filename,
+        mediaType: d.mediaType,
+        sizeBytes: d.sizeBytes,
+      }))
+
+    onSend({ text, files, attachments, documents })
 
     setInput("")
     readyAttachments.forEach((a) => URL.revokeObjectURL(a.previewUrl))
     setPendingImages([])
+    setAttachedDocs([])
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -354,12 +389,10 @@ export function Composer({
 
   const canSend =
     !isBusy &&
-    !isUploadingImages &&
-    !isProcessingDocs &&
+    !isUploading &&
     (input.trim().length > 0 || pendingImages.some((a) => a.status === "ready"))
 
-  const hasPreviews =
-    pendingImages.length > 0 || serverDocs.length > 0 || pendingDocs.length > 0
+  const hasPreviews = pendingImages.length > 0 || attachedDocs.length > 0
 
   return (
     <form
@@ -416,30 +449,20 @@ export function Composer({
             </div>
           ))}
 
-          {serverDocs.map((doc) => (
+          {attachedDocs.map((doc) => (
             <DocumentChip
-              key={doc.id}
-              document={doc}
-              onRemove={() => removeDoc.mutate(doc.id)}
-              isRemoving={removeDoc.isPending && removeDoc.variables === doc.id}
+              key={doc.key}
+              filename={doc.filename}
+              sizeBytes={doc.sizeBytes}
+              status={doc.status}
+              errorMessage={doc.status === "error" ? doc.errorMessage : undefined}
+              onRemove={() => removeDoc(doc.key)}
             />
-          ))}
-
-          {pendingDocs.map((p) => (
-            <div
-              key={p.key}
-              className="flex items-center gap-1.5 rounded-full border bg-muted/50 py-1 pr-2 pl-2.5 text-xs"
-            >
-              <span className="size-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              <span className="max-w-[10rem] truncate text-muted-foreground">
-                {p.filename}
-              </span>
-            </div>
           ))}
         </div>
       )}
 
-      {hasUploadErrors && (
+      {hasImageErrors && (
         <p className="px-4 pt-2 text-xs text-destructive">
           Some images failed to upload. Remove them and try again.
         </p>
@@ -500,10 +523,14 @@ export function Composer({
             type="submit"
             size="icon"
             disabled={!canSend}
-            aria-label="Send message"
+            aria-label={isUploading ? "Uploading attachment" : "Send message"}
             className="size-9 shrink-0 rounded-full"
           >
-            <ArrowUp className="size-4" />
+            {isUploading ? (
+              <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : (
+              <ArrowUp className="size-4" />
+            )}
           </Button>
         )}
       </div>
@@ -518,16 +545,19 @@ function formatSize(bytes: number): string {
 }
 
 function DocumentChip({
-  document,
+  filename,
+  sizeBytes,
+  status,
+  errorMessage,
   onRemove,
-  isRemoving,
 }: {
-  document: Document
+  filename: string
+  sizeBytes: number
+  status: "uploading" | "ready" | "error"
+  errorMessage?: string
   onRemove: () => void
-  isRemoving: boolean
 }) {
-  const failed = document.status === "failed"
-  const processing = document.status === "processing"
+  const failed = status === "error"
 
   return (
     <div
@@ -539,26 +569,25 @@ function DocumentChip({
       )}
       title={
         failed
-          ? "Processing failed — remove and try again"
-          : `${document.filename} · ${formatSize(document.size_bytes)}`
+          ? errorMessage ?? "Processing failed — remove and try again"
+          : `${filename} · ${formatSize(sizeBytes)}`
       }
     >
       {failed ? (
         <AlertCircle className="size-3.5 shrink-0" />
-      ) : processing ? (
+      ) : status === "uploading" ? (
         <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />
       ) : (
         <FileText className="size-3.5 shrink-0 text-muted-foreground" />
       )}
       <span className={cn("max-w-[10rem] truncate", !failed && "text-foreground/80")}>
-        {document.filename}
+        {filename}
       </span>
       <button
         type="button"
         onClick={onRemove}
-        disabled={isRemoving}
-        aria-label={`Remove ${document.filename}`}
-        className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:opacity-50"
+        aria-label={`Remove ${filename}`}
+        className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
       >
         <X className="size-3" />
       </button>

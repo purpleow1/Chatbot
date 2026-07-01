@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport } from "ai"
+import { DefaultChatTransport, type UIMessage } from "ai"
 import { Skeleton } from "@/components/ui/skeleton"
 import { chatKeys } from "@/lib/api/chats"
 import { fetchMessages, messageKeys, toUIMessage } from "@/lib/api/messages"
@@ -109,13 +109,37 @@ function Conversation({
   })
 
   const send = (payload: ComposerSubmitPayload) => {
+    const documents = payload.documents ?? []
+
+    // Build the message parts explicitly so we can include UI-only
+    // `data-document` chips alongside text + image file parts. The document
+    // chips render in the thread but are stripped server-side before the model
+    // call (the model gets retrieved chunks via the system prompt instead).
+    const parts: UIMessage["parts"] = []
+    if (payload.text) parts.push({ type: "text", text: payload.text })
+    for (const f of payload.files) {
+      parts.push({
+        type: "file",
+        url: f.url,
+        mediaType: f.mediaType,
+        ...(f.filename ? { filename: f.filename } : {}),
+      })
+    }
+    for (const d of documents) {
+      parts.push({
+        type: "data-document",
+        data: {
+          filename: d.filename,
+          mediaType: d.mediaType,
+          sizeBytes: d.sizeBytes,
+        },
+      } as UIMessage["parts"][number])
+    }
+
     sendMessage(
-      {
-        text: payload.text,
-        files: payload.files.length > 0 ? payload.files : undefined,
-      },
-      payload.attachments.length > 0
-        ? { body: { attachments: payload.attachments } }
+      { parts },
+      documents.length > 0 || payload.attachments.length > 0
+        ? { body: { attachments: payload.attachments, documents } }
         : undefined,
     )
   }

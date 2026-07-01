@@ -1,4 +1,4 @@
-import type { UIMessage, FileUIPart, TextUIPart } from "ai";
+import type { UIMessage } from "ai";
 import type { Message } from "@/lib/db/types";
 
 export const messageKeys = {
@@ -24,9 +24,9 @@ export function toUIMessage(message: Message): UIMessage {
   return {
     id: message.id,
     role: message.role,
-    parts: message.parts.flatMap((p): Array<TextUIPart | FileUIPart> => {
+    parts: message.parts.flatMap((p): UIMessage["parts"] => {
       if (p.type === "text") {
-        return [{ type: "text" as const, text: p.text }];
+        return [{ type: "text" as const, text: p.text }] as UIMessage["parts"];
       }
       if (p.type === "file") {
         return [
@@ -36,7 +36,11 @@ export function toUIMessage(message: Message): UIMessage {
             mediaType: p.mediaType,
             ...(p.filename ? { filename: p.filename } : {}),
           },
-        ];
+        ] as UIMessage["parts"];
+      }
+      // UI-only document chip — passed through for rendering in the thread.
+      if (p.type === "data-document") {
+        return [{ type: "data-document", data: p.data }] as UIMessage["parts"];
       }
       return [];
     }) as UIMessage["parts"],
