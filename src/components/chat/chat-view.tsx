@@ -10,7 +10,9 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { chatKeys } from "@/lib/api/chats"
 import { fetchMessages, messageKeys, toUIMessage } from "@/lib/api/messages"
+import { fetchUsage, usageKeys } from "@/lib/api/usage"
 import { MessageBubble, TypingIndicator } from "./message-bubble"
+import { useUpgrade } from "./upgrade"
 
 export function ChatView({ chatId }: { chatId: string }) {
   const {
@@ -59,7 +61,13 @@ function Conversation({
   initialMessages: ReturnType<typeof toUIMessage>[]
 }) {
   const queryClient = useQueryClient()
+  const { openUpgrade } = useUpgrade()
   const [input, setInput] = useState("")
+
+  const { data: usage } = useQuery({
+    queryKey: usageKeys.detail(),
+    queryFn: fetchUsage,
+  })
 
   const transport = useMemo(
     () =>
@@ -77,8 +85,20 @@ function Conversation({
     onFinish: () => {
       // Auto-title + updated_at changed server-side — refresh the sidebar.
       queryClient.invalidateQueries({ queryKey: chatKeys.list() })
+      // The anonymous allowance just went down — refresh the banner.
+      queryClient.invalidateQueries({ queryKey: usageKeys.all })
+    },
+    onError: (err) => {
+      // The server enforces the free-message limit; surface the upgrade
+      // prompt if we hit it (e.g. quota used up in another tab).
+      if (err.message.includes("message_limit_reached")) {
+        queryClient.invalidateQueries({ queryKey: usageKeys.all })
+        openUpgrade()
+      }
     },
   })
+
+  const atFreeLimit = usage?.isAnonymous === true && usage.remaining <= 0
 
   const isBusy = status === "submitted" || status === "streaming"
   const lastMessage = messages[messages.length - 1]
@@ -93,6 +113,11 @@ function Conversation({
     e.preventDefault()
     const text = input.trim()
     if (!text || isBusy) return
+    // Anonymous users out of free messages get the sign-up prompt instead.
+    if (atFreeLimit) {
+      openUpgrade()
+      return
+    }
     sendMessage({ text })
     setInput("")
   }
@@ -133,6 +158,21 @@ function Conversation({
       </div>
 
       <div className="border-t bg-background">
+        {atFreeLimit && (
+          <div className="mx-auto w-full max-w-3xl px-4 pt-3">
+            <button
+              type="button"
+              onClick={openUpgrade}
+              className="w-full rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-center text-sm text-destructive transition-colors hover:bg-destructive/20"
+            >
+              You&apos;ve used all your free messages.{" "}
+              <span className="font-semibold underline underline-offset-2">
+                Sign up
+              </span>{" "}
+              to keep chatting — your history is saved.
+            </button>
+          </div>
+        )}
         <form
           onSubmit={handleSubmit}
           className="mx-auto flex w-full max-w-3xl items-end gap-2 p-4"
@@ -142,7 +182,11 @@ function Conversation({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
-            placeholder="Message the assistant…"
+            placeholder={
+              atFreeLimit
+                ? "Sign up to continue chatting…"
+                : "Message the assistant…"
+            }
             className={cn(
               "flex-1 resize-none rounded-2xl border bg-background px-4 py-2.5 text-sm",
               "max-h-40 min-h-[44px] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",

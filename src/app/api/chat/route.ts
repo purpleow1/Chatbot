@@ -3,6 +3,8 @@ import { requireAuth } from "@/lib/auth/get-user";
 import { chatModel, SYSTEM_PROMPT, generateChatTitle } from "@/lib/ai/model";
 import { getChatById, touchChat, updateChat } from "@/lib/db/chats";
 import { createMessage } from "@/lib/db/messages";
+import { getAnonMessageCount, incrementAnonCount } from "@/lib/db/usages";
+import { ANON_MESSAGE_LIMIT } from "@/lib/constants";
 
 // Allow streamed responses up to 30s (Vercel serverless default cap).
 export const maxDuration = 30;
@@ -47,6 +49,23 @@ export async function POST(request: Request) {
   const chat = await getChatById(chatId, user.id);
   if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
 
+  // Enforce the free-question limit for anonymous users. Signed-up users
+  // are never rate-limited by this counter.
+  const isAnonymous = user.is_anonymous === true;
+  if (isAnonymous) {
+    const count = await getAnonMessageCount(user.id);
+    if (count >= ANON_MESSAGE_LIMIT) {
+      return Response.json(
+        {
+          error: "message_limit_reached",
+          limit: ANON_MESSAGE_LIMIT,
+          remaining: 0,
+        },
+        { status: 403 },
+      );
+    }
+  }
+
   // Persist the newest user message up-front so it survives even if the
   // client disconnects mid-stream.
   const lastUserMessage = [...messages]
@@ -58,6 +77,15 @@ export async function POST(request: Request) {
     const parts = toTextParts(lastUserMessage);
     if (parts.length > 0) {
       await createMessage({ chatId, role: "user", parts });
+    }
+  }
+
+  // Count this question against the anonymous allowance.
+  if (isAnonymous) {
+    try {
+      await incrementAnonCount(user.id);
+    } catch (error) {
+      console.error("[api/chat] failed to increment anon usage:", error);
     }
   }
 

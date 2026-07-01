@@ -5,12 +5,14 @@ import { PanelLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "./sidebar"
+import { UpgradeProvider, UsageBanner } from "./upgrade"
 
 export function ChatLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   return (
+    <UpgradeProvider>
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Mobile backdrop */}
       {sidebarOpen && (
@@ -37,7 +39,7 @@ export function ChatLayout({ children }: { children: React.ReactNode }) {
       {/* Main area */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Top bar */}
-        <div className="flex h-12 shrink-0 items-center border-b px-3">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <Button
             variant="ghost"
             size="icon"
@@ -52,10 +54,14 @@ export function ChatLayout({ children }: { children: React.ReactNode }) {
           >
             <PanelLeft className="size-4" />
           </Button>
+          <div className="ml-auto">
+            <UsageBanner />
+          </div>
         </div>
 
         <main className="flex-1 overflow-hidden">{children}</main>
       </div>
     </div>
+    </UpgradeProvider>
   )
 }
