@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport } from "ai"
@@ -9,9 +9,9 @@ import { chatKeys } from "@/lib/api/chats"
 import { fetchMessages, messageKeys, toUIMessage } from "@/lib/api/messages"
 import { fetchUsage, usageKeys } from "@/lib/api/usage"
 import { takePendingMessage } from "@/lib/pending-message"
+import { consumePendingDraft, peekPendingDraft } from "@/lib/pending-draft"
 import { MessageBubble, TypingIndicator } from "./message-bubble"
 import { Composer, type ComposerSubmitPayload } from "./composer"
-import { DocumentsBar } from "./documents-bar"
 import { useUpgrade } from "./upgrade"
 
 // ---------------------------------------------------------------------------
@@ -69,6 +69,14 @@ function Conversation({
 }) {
   const queryClient = useQueryClient()
   const { openUpgrade } = useUpgrade()
+
+  // A draft handed off from the home screen when a document was attached
+  // before this chat existed. Read once (peek is side-effect-free, so it's
+  // safe under Strict Mode); the effect below consumes it.
+  const [draft] = useState(() => peekPendingDraft(chatId))
+  useEffect(() => {
+    consumePendingDraft(chatId)
+  }, [chatId])
 
   const { data: usage } = useQuery({
     queryKey: usageKeys.detail(),
@@ -197,17 +205,17 @@ function Conversation({
           </div>
         )}
 
-        <div className="pt-2">
-          <DocumentsBar chatId={chatId} />
-        </div>
-
-        <div className="mx-auto w-full max-w-3xl px-4 pt-1 pb-4">
+        <div className="mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
           <Composer
+            chatId={chatId}
             onSend={send}
             isBusy={isBusy}
             onStop={stop}
             atFreeLimit={atFreeLimit}
             onBlocked={openUpgrade}
+            initialText={draft?.text}
+            initialImageAttachments={draft?.imageAttachments}
+            initialDocumentFiles={draft?.documentFiles}
           />
           <p className="mt-2 text-center text-xs text-muted-foreground">
             The assistant can make mistakes. Check important info.

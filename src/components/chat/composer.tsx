@@ -1,13 +1,9 @@
 "use client"
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { FileUIPart } from "ai"
-import { ArrowUp, ImagePlus, Square, X } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { AlertCircle, ArrowUp, FileText, Paperclip, Square, X } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -18,6 +14,17 @@ import {
   type AttachmentInput,
   type UploadResult,
 } from "@/lib/api/uploads"
+import {
+  ACCEPTED_DOCUMENT_EXTENSIONS,
+  MAX_DOCUMENT_SIZE,
+  deleteDocument,
+  documentKeys,
+  fetchDocuments,
+  isAcceptedDocument,
+  uploadDocument,
+} from "@/lib/api/documents"
+import type { PendingDraft } from "@/lib/pending-draft"
+import type { Document } from "@/lib/db/types"
 
 export interface ComposerSubmitPayload {
   text: string
@@ -36,17 +43,44 @@ interface ComposerProps {
   onBlocked?: () => void
   autoFocus?: boolean
   placeholder?: string
+  /**
+   * The chat these attachments belong to. Documents require a chat, so when
+   * this is undefined (home screen) attaching a document instead calls
+   * `onNeedChatForDocuments` to create one first (Option A: eager creation).
+   */
+  chatId?: string
+  /** Seed values restored from a handed-off draft (see `pending-draft`). */
+  initialText?: string
+  initialImageAttachments?: UploadResult[]
+  initialDocumentFiles?: File[]
+  /** Home-screen only: user attached documents but no chat exists yet. */
+  onNeedChatForDocuments?: (draft: PendingDraft) => void
 }
 
 type PendingAttachment = {
   key: string
   previewUrl: string
-  file: File
+  file?: File
 } & (
   | { status: "uploading" }
   | { status: "error"; errorMessage: string }
   | { status: "ready"; result: UploadResult }
 )
+
+/** A document currently uploading/ingesting (not yet in the server list). */
+type PendingDoc = { key: string; filename: string }
+
+const isImageFile = (f: File) =>
+  (ALLOWED_IMAGE_TYPES as readonly string[]).includes(f.type)
+
+function readyAttachmentFromResult(result: UploadResult): PendingAttachment {
+  return {
+    key: `${Date.now()}-${Math.random()}`,
+    previewUrl: result.signedUrl,
+    status: "ready",
+    result,
+  }
+}
 
 export function Composer({
   onSend,
@@ -56,17 +90,46 @@ export function Composer({
   onBlocked,
   autoFocus = false,
   placeholder = "Message the assistant…",
+  chatId,
+  initialText,
+  initialImageAttachments,
+  initialDocumentFiles,
+  onNeedChatForDocuments,
 }: ComposerProps) {
-  const [input, setInput] = useState("")
-  const [pendingAttachments, setPendingAttachments] = useState<
-    PendingAttachment[]
-  >([])
+  const queryClient = useQueryClient()
+  const [input, setInput] = useState(initialText ?? "")
+  const [pendingImages, setPendingImages] = useState<PendingAttachment[]>(() =>
+    (initialImageAttachments ?? []).map(readyAttachmentFromResult),
+  )
+  const [pendingDocs, setPendingDocs] = useState<PendingDoc[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const isUploading = pendingAttachments.some((a) => a.status === "uploading")
-  const hasUploadErrors = pendingAttachments.some((a) => a.status === "error")
+  const isUploadingImages = pendingImages.some((a) => a.status === "uploading")
+  const hasUploadErrors = pendingImages.some((a) => a.status === "error")
+  const isProcessingDocs = pendingDocs.length > 0
+
+  // A chat's persisted documents (available as RAG context). Home screen has
+  // no chat yet, so the query stays disabled there.
+  const { data: serverDocs = [] } = useQuery({
+    queryKey: chatId ? documentKeys.list(chatId) : documentKeys.list("none"),
+    queryFn: () => fetchDocuments(chatId as string),
+    enabled: !!chatId,
+    staleTime: 30_000,
+  })
+
+  const removeDoc = useMutation({
+    mutationFn: (documentId: string) => deleteDocument(documentId),
+    onSuccess: () => {
+      if (chatId) {
+        queryClient.invalidateQueries({ queryKey: documentKeys.list(chatId) })
+      }
+    },
+    onError: () => {
+      toast.error("Couldn't remove document", { description: "Please try again." })
+    },
+  })
 
   useEffect(() => {
     if (autoFocus) textareaRef.current?.focus()
@@ -80,31 +143,25 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
   }, [input])
 
-  // Revoke object URLs on unmount.
+  // Revoke object URLs on unmount (no-op for restored http preview URLs).
   useEffect(() => {
     return () => {
-      pendingAttachments.forEach((a) => URL.revokeObjectURL(a.previewUrl))
+      pendingImages.forEach((a) => URL.revokeObjectURL(a.previewUrl))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const addFiles = useCallback(async (files: File[]) => {
+  const addImageFiles = useCallback(async (files: File[]) => {
     const rejected = files.filter(
-      (f) =>
-        !(ALLOWED_IMAGE_TYPES as readonly string[]).includes(f.type) ||
-        f.size > MAX_FILE_SIZE,
+      (f) => !isImageFile(f) || f.size > MAX_FILE_SIZE,
     )
     if (rejected.length > 0) {
-      toast.error("Some files were skipped", {
+      toast.error("Some images were skipped", {
         description: "Only images up to 5 MB (JPEG, PNG, GIF, WebP) are allowed.",
       })
     }
 
-    const valid = files.filter(
-      (f) =>
-        (ALLOWED_IMAGE_TYPES as readonly string[]).includes(f.type) &&
-        f.size <= MAX_FILE_SIZE,
-    )
+    const valid = files.filter((f) => isImageFile(f) && f.size <= MAX_FILE_SIZE)
     if (valid.length === 0) return
 
     const newPending: PendingAttachment[] = valid.map((file) => ({
@@ -114,13 +171,13 @@ export function Composer({
       status: "uploading",
     }))
 
-    setPendingAttachments((prev) => [...prev, ...newPending])
+    setPendingImages((prev) => [...prev, ...newPending])
 
     await Promise.all(
       newPending.map(async (pending) => {
         try {
-          const result = await uploadFile(pending.file)
-          setPendingAttachments((prev) =>
+          const result = await uploadFile(pending.file!)
+          setPendingImages((prev) =>
             prev.map((a) =>
               a.key === pending.key ? { ...a, status: "ready", result } : a,
             ),
@@ -128,7 +185,7 @@ export function Composer({
         } catch (err) {
           const msg = err instanceof Error ? err.message : "Upload failed"
           toast.error("Image upload failed", { description: msg })
-          setPendingAttachments((prev) =>
+          setPendingImages((prev) =>
             prev.map((a) =>
               a.key === pending.key
                 ? { ...a, status: "error", errorMessage: msg }
@@ -140,8 +197,88 @@ export function Composer({
     )
   }, [])
 
-  const removeAttachment = useCallback((key: string) => {
-    setPendingAttachments((prev) => {
+  const addDocumentFiles = useCallback(
+    async (files: File[]) => {
+      const valid: File[] = []
+      for (const file of files) {
+        if (!isAcceptedDocument(file)) {
+          toast.error("Unsupported file", {
+            description: `${file.name} — allowed: PDF, TXT, Markdown, DOCX.`,
+          })
+        } else if (file.size > MAX_DOCUMENT_SIZE) {
+          toast.error("File too large", {
+            description: `${file.name} exceeds the 10 MB limit.`,
+          })
+        } else {
+          valid.push(file)
+        }
+      }
+      if (valid.length === 0) return
+
+      // No chat yet (home screen): hand the draft off so a chat is created,
+      // then the chat view uploads these documents on mount.
+      if (!chatId) {
+        const readyImages = pendingImages
+          .filter(
+            (a): a is PendingAttachment & { status: "ready"; result: UploadResult } =>
+              a.status === "ready",
+          )
+          .map((a) => a.result)
+        onNeedChatForDocuments?.({
+          text: input,
+          imageAttachments: readyImages,
+          documentFiles: valid,
+        })
+        return
+      }
+
+      await Promise.all(
+        valid.map(async (file) => {
+          const key = `${Date.now()}-${Math.random()}`
+          setPendingDocs((prev) => [...prev, { key, filename: file.name }])
+          try {
+            await uploadDocument(chatId, file)
+            await queryClient.invalidateQueries({
+              queryKey: documentKeys.list(chatId),
+            })
+            toast.success("Document ready", {
+              description: `${file.name} is now available as context.`,
+            })
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "Upload failed"
+            toast.error("Couldn't add document", { description: message })
+          } finally {
+            setPendingDocs((prev) => prev.filter((p) => p.key !== key))
+          }
+        }),
+      )
+    },
+    [chatId, input, pendingImages, onNeedChatForDocuments, queryClient],
+  )
+
+  // Upload any documents handed off from the home screen once, on mount.
+  const didInitDocsRef = useRef(false)
+  useEffect(() => {
+    if (didInitDocsRef.current) return
+    if (chatId && initialDocumentFiles && initialDocumentFiles.length > 0) {
+      didInitDocsRef.current = true
+      void addDocumentFiles(initialDocumentFiles)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId])
+
+  const handleFiles = useCallback(
+    (files: File[]) => {
+      const images = files.filter(isImageFile)
+      const docs = files.filter((f) => !isImageFile(f))
+      if (images.length > 0) void addImageFiles(images)
+      if (docs.length > 0) void addDocumentFiles(docs)
+    },
+    [addImageFiles, addDocumentFiles],
+  )
+
+  const removeImage = useCallback((key: string) => {
+    setPendingImages((prev) => {
       const removed = prev.find((a) => a.key === key)
       if (removed) URL.revokeObjectURL(removed.previewUrl)
       return prev.filter((a) => a.key !== key)
@@ -150,47 +287,38 @@ export function Composer({
 
   function handleDragOver(e: React.DragEvent) {
     e.preventDefault()
-    if (
-      [...(e.dataTransfer.items ?? [])].some((item) =>
-        (ALLOWED_IMAGE_TYPES as readonly string[]).includes(item.type),
-      )
-    ) {
-      setIsDragOver(true)
-    }
+    if ((e.dataTransfer.items?.length ?? 0) > 0) setIsDragOver(true)
   }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
     setIsDragOver(false)
-    const files = [...(e.dataTransfer.files ?? [])].filter((f) =>
-      (ALLOWED_IMAGE_TYPES as readonly string[]).includes(f.type),
-    )
-    if (files.length > 0) void addFiles(files)
+    const files = [...(e.dataTransfer.files ?? [])]
+    if (files.length > 0) handleFiles(files)
   }
 
   function handlePaste(e: React.ClipboardEvent) {
     const imageFiles = [...(e.clipboardData?.items ?? [])]
-      .filter((item) =>
-        (ALLOWED_IMAGE_TYPES as readonly string[]).includes(item.type),
-      )
+      .filter((item) => (ALLOWED_IMAGE_TYPES as readonly string[]).includes(item.type))
       .map((item) => item.getAsFile())
       .filter((f): f is File => f !== null)
 
     if (imageFiles.length > 0) {
       e.preventDefault()
-      void addFiles(imageFiles)
+      void addImageFiles(imageFiles)
     }
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const text = input.trim()
-    const readyAttachments = pendingAttachments.filter(
+    const readyAttachments = pendingImages.filter(
       (a): a is PendingAttachment & { status: "ready"; result: UploadResult } =>
         a.status === "ready",
     )
 
-    if ((!text && readyAttachments.length === 0) || isBusy || isUploading) return
+    if ((!text && readyAttachments.length === 0) || isBusy) return
+    if (isUploadingImages || isProcessingDocs) return
     if (atFreeLimit) {
       onBlocked?.()
       return
@@ -214,7 +342,7 @@ export function Composer({
 
     setInput("")
     readyAttachments.forEach((a) => URL.revokeObjectURL(a.previewUrl))
-    setPendingAttachments([])
+    setPendingImages([])
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -226,9 +354,12 @@ export function Composer({
 
   const canSend =
     !isBusy &&
-    !isUploading &&
-    (input.trim().length > 0 ||
-      pendingAttachments.some((a) => a.status === "ready"))
+    !isUploadingImages &&
+    !isProcessingDocs &&
+    (input.trim().length > 0 || pendingImages.some((a) => a.status === "ready"))
+
+  const hasPreviews =
+    pendingImages.length > 0 || serverDocs.length > 0 || pendingDocs.length > 0
 
   return (
     <form
@@ -243,14 +374,14 @@ export function Composer({
     >
       {isDragOver && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-3xl bg-primary/5">
-          <p className="text-sm font-medium text-primary">Drop image to attach</p>
+          <p className="text-sm font-medium text-primary">Drop files to attach</p>
         </div>
       )}
 
-      {/* Attachment previews */}
-      {pendingAttachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-3 pt-3">
-          {pendingAttachments.map((att) => (
+      {/* Attachment previews: images + documents */}
+      {hasPreviews && (
+        <div className="flex flex-wrap items-center gap-2 px-3 pt-3">
+          {pendingImages.map((att) => (
             <div
               key={att.key}
               className="relative size-16 shrink-0 overflow-hidden rounded-lg border bg-muted"
@@ -276,12 +407,33 @@ export function Composer({
               )}
               <button
                 type="button"
-                onClick={() => removeAttachment(att.key)}
+                onClick={() => removeImage(att.key)}
                 className="absolute top-0.5 right-0.5 rounded-full bg-background/80 p-0.5 text-foreground hover:bg-background"
                 aria-label="Remove attachment"
               >
                 <X className="size-3" />
               </button>
+            </div>
+          ))}
+
+          {serverDocs.map((doc) => (
+            <DocumentChip
+              key={doc.id}
+              document={doc}
+              onRemove={() => removeDoc.mutate(doc.id)}
+              isRemoving={removeDoc.isPending && removeDoc.variables === doc.id}
+            />
+          ))}
+
+          {pendingDocs.map((p) => (
+            <div
+              key={p.key}
+              className="flex items-center gap-1.5 rounded-full border bg-muted/50 py-1 pr-2 pl-2.5 text-xs"
+            >
+              <span className="size-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <span className="max-w-[10rem] truncate text-muted-foreground">
+                {p.filename}
+              </span>
             </div>
           ))}
         </div>
@@ -301,20 +453,21 @@ export function Composer({
           variant="ghost"
           onClick={() => fileInputRef.current?.click()}
           disabled={isBusy}
-          aria-label="Attach image"
+          aria-label="Attach image or document"
+          title="Attach image or document"
           className="size-9 shrink-0 rounded-full"
         >
-          <ImagePlus className="size-4" />
+          <Paperclip className="size-4" />
         </Button>
         <input
           ref={fileInputRef}
           type="file"
-          accept={ALLOWED_IMAGE_TYPES.join(",")}
+          accept={`${ALLOWED_IMAGE_TYPES.join(",")},${ACCEPTED_DOCUMENT_EXTENSIONS}`}
           multiple
           className="hidden"
           onChange={(e) => {
             const files = [...(e.target.files ?? [])]
-            if (files.length > 0) void addFiles(files)
+            if (files.length > 0) handleFiles(files)
             e.target.value = ""
           }}
         />
@@ -355,5 +508,60 @@ export function Composer({
         )}
       </div>
     </form>
+  )
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function DocumentChip({
+  document,
+  onRemove,
+  isRemoving,
+}: {
+  document: Document
+  onRemove: () => void
+  isRemoving: boolean
+}) {
+  const failed = document.status === "failed"
+  const processing = document.status === "processing"
+
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-1.5 rounded-full border py-1 pr-1 pl-2.5 text-xs",
+        failed
+          ? "border-destructive/40 bg-destructive/10 text-destructive"
+          : "bg-muted/50",
+      )}
+      title={
+        failed
+          ? "Processing failed — remove and try again"
+          : `${document.filename} · ${formatSize(document.size_bytes)}`
+      }
+    >
+      {failed ? (
+        <AlertCircle className="size-3.5 shrink-0" />
+      ) : processing ? (
+        <span className="size-3.5 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      ) : (
+        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+      )}
+      <span className={cn("max-w-[10rem] truncate", !failed && "text-foreground/80")}>
+        {document.filename}
+      </span>
+      <button
+        type="button"
+        onClick={onRemove}
+        disabled={isRemoving}
+        aria-label={`Remove ${document.filename}`}
+        className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:opacity-50"
+      >
+        <X className="size-3" />
+      </button>
+    </div>
   )
 }
