@@ -36,3 +36,8 @@ export async function removeChatById(id: string): Promise<void> {
   const res = await fetch(`/api/chats/${id}`, { method: "DELETE" })
   if (!res.ok) throw new Error("Failed to delete chat")
 }
+
+export async function clearAllChats(): Promise<void> {
+  const res = await fetch("/api/chats", { method: "DELETE" })
+  if (!res.ok) throw new Error("Failed to clear chats")
+}

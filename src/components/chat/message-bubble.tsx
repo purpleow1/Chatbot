@@ -2,6 +2,8 @@
 
 import type { UIMessage } from "ai"
 import { cn } from "@/lib/utils"
+import { Markdown } from "./markdown"
+import { CopyButton } from "./copy-button"
 
 function messageText(message: UIMessage): string {
   return message.parts
@@ -25,24 +27,44 @@ export function MessageBubble({ message }: { message: UIMessage }) {
   const text = messageText(message)
   const imageParts = message.parts.filter(isImageFilePart)
 
-  return (
-    <div className={cn("flex w-full", isUser ? "justify-end" : "justify-start")}>
-      <div
-        className={cn(
-          "max-w-[80%] rounded-2xl text-sm",
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground",
-          imageParts.length > 0 || text ? "overflow-hidden" : "",
-        )}
-      >
-        {imageParts.length > 0 && (
-          <div
-            className={cn(
-              "flex flex-wrap gap-1",
-              text ? "p-1 pb-0" : "p-1",
+  if (isUser) {
+    return (
+      <div className="group/msg flex w-full animate-in fade-in slide-in-from-bottom-1 justify-end duration-300">
+        <div className="flex max-w-[85%] flex-col items-end gap-1">
+          <div className="overflow-hidden rounded-2xl bg-primary text-sm text-primary-foreground">
+            {imageParts.length > 0 && (
+              <div className={cn("flex flex-wrap gap-1", text ? "p-1 pb-0" : "p-1")}>
+                {imageParts.map((part, i) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    key={i}
+                    src={part.url}
+                    alt={part.filename ?? "Attached image"}
+                    className="max-h-64 max-w-full rounded-xl object-contain"
+                  />
+                ))}
+              </div>
             )}
-          >
+            {text && (
+              <p className="px-4 py-2.5 break-words whitespace-pre-wrap">{text}</p>
+            )}
+          </div>
+          {text && (
+            <div className="opacity-0 transition-opacity group-hover/msg:opacity-100">
+              <CopyButton value={text} label="Copy message" />
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Assistant message — no bubble, full-width markdown like ChatGPT.
+  return (
+    <div className="group/msg flex w-full animate-in fade-in slide-in-from-bottom-1 justify-start duration-300">
+      <div className="flex w-full max-w-full flex-col gap-1">
+        {imageParts.length > 0 && (
+          <div className="flex flex-wrap gap-1">
             {imageParts.map((part, i) => (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -54,9 +76,11 @@ export function MessageBubble({ message }: { message: UIMessage }) {
             ))}
           </div>
         )}
-
+        {text && <Markdown content={text} />}
         {text && (
-          <p className="px-4 py-2.5 whitespace-pre-wrap break-words">{text}</p>
+          <div className="opacity-0 transition-opacity group-hover/msg:opacity-100">
+            <CopyButton value={text} label="Copy message" />
+          </div>
         )}
       </div>
     </div>

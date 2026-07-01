@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Menu } from "@base-ui/react/menu"
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { chatKeys, removeChatById, renameChat } from "@/lib/api/chats"
 import type { Chat } from "@/lib/db/types"
@@ -33,14 +34,48 @@ export function ChatItem({ chat }: ChatItemProps) {
 
   const renameMutation = useMutation({
     mutationFn: (title: string) => renameChat(chat.id, title),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: chatKeys.list() }),
+    // Optimistically update the sidebar cache so the new title shows instantly,
+    // without waiting for the server round-trip.
+    onMutate: async (title) => {
+      await queryClient.cancelQueries({ queryKey: chatKeys.list() })
+      const previous = queryClient.getQueryData<Chat[]>(chatKeys.list())
+      queryClient.setQueryData<Chat[]>(chatKeys.list(), (old) =>
+        old?.map((c) => (c.id === chat.id ? { ...c, title } : c)),
+      )
+      return { previous }
+    },
+    onError: (_err, _title, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(chatKeys.list(), context.previous)
+      }
+      toast.error("Couldn't rename chat", { description: "Please try again." })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: chatKeys.list() })
+    },
   })
 
   const deleteMutation = useMutation({
     mutationFn: () => removeChatById(chat.id),
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: chatKeys.list() })
+      const previous = queryClient.getQueryData<Chat[]>(chatKeys.list())
+      queryClient.setQueryData<Chat[]>(chatKeys.list(), (old) =>
+        old?.filter((c) => c.id !== chat.id),
+      )
+      return { previous }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(chatKeys.list(), context.previous)
+      }
+      toast.error("Couldn't delete chat", { description: "Please try again." })
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: chatKeys.list() })
       if (isActive) router.push("/")
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: chatKeys.list() })
     },
   })
 

@@ -3,7 +3,8 @@ import "server-only";
 export type ChatBroadcastEvent =
   | { type: "chat.created"; chatId: string }
   | { type: "chat.updated"; chatId: string }
-  | { type: "chat.deleted"; chatId: string };
+  // chatId is omitted when clearing all chats at once.
+  | { type: "chat.deleted"; chatId?: string };
 
 /** Per-user Broadcast channel name. Must match the client subscription. */
 export const userChannel = (userId: string) => `user:${userId}`;

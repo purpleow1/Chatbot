@@ -6,6 +6,14 @@ export type UploadResult = {
   filename?: string;
 };
 
+/** Attachment metadata sent to /api/chat so it can persist attachment rows. */
+export type AttachmentInput = {
+  storagePath: string;
+  mediaType: string;
+  sizeBytes: number;
+  filename?: string;
+};
+
 export const ALLOWED_IMAGE_TYPES = [
   "image/jpeg",
   "image/png",

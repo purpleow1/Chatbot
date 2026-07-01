@@ -5,6 +5,7 @@ import { PanelLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "./sidebar"
+import { ThemeToggle } from "./theme-toggle"
 import { UpgradeProvider, UsageBanner } from "./upgrade"
 import { useRealtimeSync } from "@/hooks/use-realtime-sync"
 
@@ -57,8 +58,9 @@ export function ChatLayout({ children }: { children: React.ReactNode }) {
           >
             <PanelLeft className="size-4" />
           </Button>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-1">
             <UsageBanner />
+            <ThemeToggle />
           </div>
         </div>
 

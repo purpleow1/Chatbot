@@ -71,6 +71,16 @@ export async function deleteChat(id: string, userId: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Delete every chat belonging to a user (cascades to messages/attachments). */
+export async function deleteAllChats(userId: string): Promise<void> {
+  const { error } = await adminClient
+    .from("chats")
+    .delete()
+    .eq("user_id", userId);
+
+  if (error) throw error;
+}
+
 /** Bump updated_at so the chat floats to the top of the sidebar. */
 export async function touchChat(id: string): Promise<void> {
   const { error } = await adminClient
