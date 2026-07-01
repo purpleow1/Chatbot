@@ -4,60 +4,6 @@ A ChatGPT-style AI chatbot: send messages and stream responses in real time, kee
 
 > Live demo: _add your Vercel URL here after deploying_
 
-## Features
-
-- **Streaming chat** — messages stream token-by-token from Google Gemini via the Vercel AI SDK, with a stop button and typing indicator.
-- **Persistent chat history** — left sidebar lists your conversations (create, rename, delete, search), stored in Postgres.
-- **Authentication** — email/password plus Google and GitHub OAuth, via Supabase Auth.
-- **Anonymous access** — try up to 3 free questions with no account, then a prompt to sign up. Upgrading keeps your existing chats.
-- **Image attachments** — paste, drag, or pick images and ask about them (Gemini vision). Images persist across reloads.
-- **Cross-tab sync** — creating, renaming, or deleting a chat in one tab updates all other open tabs in real time (Supabase Realtime).
-- **Polished UX** — Markdown + syntax-highlighted code with copy buttons, auto-scroll, dark mode, and loading/empty/error states.
-
-## Tech stack
-
-| Layer | Choice |
-|---|---|
-| Framework | Next.js (App Router, TypeScript) |
-| UI | shadcn/ui + Tailwind CSS |
-| Data fetching | TanStack Query |
-| LLM | Google Gemini via the Vercel AI SDK v5 |
-| Server | Next.js REST route handlers (`src/app/api/*`) |
-| Database | Supabase Postgres (accessed server-side only, via the service-role key) |
-| Auth | Supabase Auth (`@supabase/ssr`) |
-| Realtime | Supabase Realtime (Broadcast) |
-| Deployment | Vercel + Supabase cloud |
-
-## Architecture
-
-The codebase keeps the three layers strictly separate, per the project brief:
-
-```
-Client components ──fetch──▶ REST API routes ──▶ DB data-access layer ──▶ Supabase Postgres
-(TanStack Query,            (src/app/api/*)      (src/lib/db/*,
- useChat)                                         service-role, server-only)
-```
-
-- **No DB calls in components** (including Server Components). Components only call `/api/*`.
-- **All DB access uses the Supabase service-role client**, isolated in `server-only` files. There is no public DB client and no RLS reliance.
-- **Auth identity** is read from the request cookie via `@supabase/ssr` (auth only), and every query is scoped to that `userId`.
-- The **public anon key** is used only client-side for Supabase Realtime (Broadcast) — the one place the brief allows it.
-- Secrets (`GOOGLE_GENERATIVE_AI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are never prefixed with `NEXT_PUBLIC_`.
-
-## API endpoints
-
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `GET` / `POST` | `/api/chats` | List / create chats |
-| `GET` / `PATCH` / `DELETE` | `/api/chats/[chatId]` | Fetch / rename / delete a chat |
-| `GET` | `/api/chats/[chatId]/messages` | Load a chat's message history |
-| `GET` | `/api/chats/search?q=` | Search chats by title |
-| `POST` | `/api/chat` | Stream an assistant response and persist messages |
-| `POST` | `/api/uploads` | Upload an image to Storage, return a signed URL |
-| `GET` | `/api/usage` | Anonymous free-question count remaining |
-
-All routes are auth-guarded and scoped to the signed-in (or anonymous) user.
-
 ## Getting started
 
 ### Prerequisites
@@ -113,41 +59,62 @@ In the Supabase dashboard → Authentication:
 - **Sign In / Providers** → enable **Google** and/or **GitHub** and paste each provider's Client ID + Secret.
 - In the provider's own console (Google Cloud Console / GitHub Developer Settings), set the authorized callback to `https://<your-project-ref>.supabase.co/auth/v1/callback`.
 
+## Features
+
+- **Streaming chat** — messages stream token-by-token from Google Gemini via the Vercel AI SDK, with a stop button and typing indicator.
+- **Persistent chat history** — left sidebar lists your conversations (create, rename, delete, search), stored in Postgres.
+- **Authentication** — email/password plus Google and GitHub OAuth, via Supabase Auth.
+- **Anonymous access** — try up to 3 free questions with no account, then a prompt to sign up. Upgrading keeps your existing chats.
+- **Image attachments** — paste, drag, or pick images and ask about them (Gemini vision). Images persist across reloads.
+- **Cross-tab sync** — creating, renaming, or deleting a chat in one tab updates all other open tabs in real time (Supabase Realtime).
+- **Polished UX** — Markdown + syntax-highlighted code with copy buttons, auto-scroll, dark mode, and loading/empty/error states.
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js (App Router, TypeScript) |
+| UI | shadcn/ui + Tailwind CSS |
+| Data fetching | TanStack Query |
+| LLM | Google Gemini via the Vercel AI SDK v5 |
+| Server | Next.js REST route handlers (`src/app/api/*`) |
+| Database | Supabase Postgres (accessed server-side only, via the service-role key) |
+| Auth | Supabase Auth (`@supabase/ssr`) |
+| Realtime | Supabase Realtime (Broadcast) |
+| Deployment | Vercel + Supabase cloud |
+
+## Architecture
+
+The codebase keeps the three layers strictly separate, per the project brief:
+
+```
+Client components ──fetch──▶ REST API routes ──▶ DB data-access layer ──▶ Supabase Postgres
+(TanStack Query,            (src/app/api/*)      (src/lib/db/*,
+ useChat)                                         service-role, server-only)
+```
+
+- **No DB calls in components** (including Server Components). Components only call `/api/*`.
+- **All DB access uses the Supabase service-role client**, isolated in `server-only` files. There is no public DB client and no RLS reliance.
+- **Auth identity** is read from the request cookie via `@supabase/ssr` (auth only), and every query is scoped to that `userId`.
+- The **public anon key** is used only client-side for Supabase Realtime (Broadcast) — the one place the brief allows it.
+- Secrets (`GOOGLE_GENERATIVE_AI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are never prefixed with `NEXT_PUBLIC_`.
+
+## API endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` / `POST` | `/api/chats` | List / create chats |
+| `GET` / `PATCH` / `DELETE` | `/api/chats/[chatId]` | Fetch / rename / delete a chat |
+| `GET` | `/api/chats/[chatId]/messages` | Load a chat's message history |
+| `GET` | `/api/chats/search?q=` | Search chats by title |
+| `POST` | `/api/chat` | Stream an assistant response and persist messages |
+| `POST` | `/api/uploads` | Upload an image to Storage, return a signed URL |
+| `GET` | `/api/usage` | Anonymous free-question count remaining |
+
+All routes are auth-guarded and scoped to the signed-in (or anonymous) user.
+
 ## Deployment (Vercel)
 
 1. Push this repo to GitHub, then in Vercel: **Add New → Project → Import** the repo (framework auto-detects as Next.js).
 2. Add the five environment variables from `.env.example` in **Settings → Environment Variables** (Production + Preview).
 3. Deploy, then add the resulting `https://<app>.vercel.app` URL to Supabase → Authentication → URL Configuration (Site URL + Redirect URLs) so OAuth works in production.
-
-## Project structure
-
-```
-src/
-  app/
-    (auth)/          login, signup pages
-    (chat)/          chat UI (sidebar + message area, /c/[chatId])
-    api/             REST route handlers (chats, messages, chat stream, uploads, usage)
-    auth/callback/   OAuth callback
-  components/
-    chat/            chat-specific components
-    ui/              shadcn primitives
-  lib/
-    ai/              Gemini model + title generation (server-only)
-    supabase/        admin (server-only), ssr auth, realtime clients
-    db/              data-access repositories (server-only)
-    api/             client-side fetchers + TanStack Query keys
-    realtime/        broadcast helper
-  providers/         TanStack Query provider
-supabase/
-  migrations/        SQL migration files
-```
-
-## Scripts
-
-| Command | Description |
-|---|---|
-| `npm run dev` | Start the development server |
-| `npm run build` | Production build |
-| `npm run start` | Run the production build locally |
-| `npm run lint` | ESLint |
-| `npm run format` | Prettier |
