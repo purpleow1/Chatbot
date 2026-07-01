@@ -2,7 +2,7 @@
 
 A ChatGPT-style AI chatbot: send messages and stream responses in real time, keep a searchable history of conversations, attach images, and try it anonymously before signing in. Built with Next.js, Google Gemini, and Supabase.
 
-> Live demo: _add your Vercel URL here after deploying_
+> Live demo: https://chatbot-rosy-alpha-59.vercel.app/
 
 ## Getting started
 
@@ -106,7 +106,7 @@ Client components ──fetch──▶ REST API routes ──▶ DB data-access 
 | `GET` / `POST` | `/api/chats` | List / create chats |
 | `GET` / `PATCH` / `DELETE` | `/api/chats/[chatId]` | Fetch / rename / delete a chat |
 | `GET` | `/api/chats/[chatId]/messages` | Load a chat's message history |
-| `GET` | `/api/chats/search?q=` | Search chats by title |
+| `GET` | `/api/chats/search?q=` | Search chats by title and message content |
 | `POST` | `/api/chat` | Stream an assistant response and persist messages |
 | `POST` | `/api/uploads` | Upload an image to Storage, return a signed URL |
 | `GET` | `/api/usage` | Anonymous free-question count remaining |
