@@ -163,11 +163,11 @@ function Conversation({
             <button
               type="button"
               onClick={openUpgrade}
-              className="w-full rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2 text-center text-sm text-destructive transition-colors hover:bg-destructive/20"
+              className="w-full rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-sm text-amber-700 transition-colors hover:bg-amber-500/15 dark:text-amber-400"
             >
               You&apos;ve used all your free messages.{" "}
               <span className="font-semibold underline underline-offset-2">
-                Sign up
+                Sign up or log in
               </span>{" "}
               to keep chatting — your history is saved.
             </button>

@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useContext, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Dialog } from "@base-ui/react/dialog"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Eye, EyeOff, Sparkles, X } from "lucide-react"
@@ -66,7 +67,7 @@ export function UsageBanner() {
       className={cn(
         "flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
         atLimit
-          ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20"
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-400"
           : "border-border bg-muted/50 text-muted-foreground hover:bg-muted",
       )}
     >
@@ -96,7 +97,9 @@ function UpgradeDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const queryClient = useQueryClient()
+  const router = useRouter()
 
+  const [mode, setMode] = useState<"signup" | "login">("signup")
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -109,12 +112,45 @@ function UpgradeDialog({
   const [pendingConfirmation, setPendingConfirmation] = useState(false)
   const [done, setDone] = useState(false)
 
+  const isLogin = mode === "login"
+
   function reset() {
+    setMode("signup")
     setError(null)
     setPendingConfirmation(false)
     setDone(false)
     setIsLoading(false)
     setOauthLoading(null)
+  }
+
+  function switchMode(next: "signup" | "login") {
+    setMode(next)
+    setError(null)
+  }
+
+  async function handleEmailLogin(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setIsLoading(true)
+
+    const supabase = createSupabaseBrowserClient()
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (error) {
+      setError(error.message)
+      setIsLoading(false)
+      return
+    }
+
+    // Signed into an existing account — leave the anonymous session behind and
+    // reload data for the now-current user.
+    onOpenChange(false)
+    queryClient.invalidateQueries()
+    router.push("/")
+    router.refresh()
   }
 
   async function handleEmailUpgrade(e: React.FormEvent) {
@@ -150,15 +186,20 @@ function UpgradeDialog({
     setIsLoading(false)
   }
 
-  async function handleOAuthLink(provider: "google" | "github") {
+  async function handleOAuth(provider: "google" | "github") {
     setError(null)
     setOauthLoading(provider)
 
     const supabase = createSupabaseBrowserClient()
-    const { error } = await supabase.auth.linkIdentity({
-      provider,
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
-    })
+    const options = {
+      redirectTo: `${window.location.origin}/auth/callback`,
+    }
+
+    // Signing up links the identity to the current anonymous user so chats are
+    // preserved; logging in switches to an existing account.
+    const { error } = isLogin
+      ? await supabase.auth.signInWithOAuth({ provider, options })
+      : await supabase.auth.linkIdentity({ provider, options })
 
     if (error) {
       setError(error.message)
@@ -224,11 +265,12 @@ function UpgradeDialog({
             <div className="space-y-4">
               <div className="space-y-1">
                 <Dialog.Title className="text-lg font-semibold">
-                  Create a free account
+                  {isLogin ? "Welcome back" : "Create a free account"}
                 </Dialog.Title>
                 <Dialog.Description className="text-sm text-muted-foreground">
-                  Sign up to keep chatting without limits. Your current
-                  conversation and history are preserved.
+                  {isLogin
+                    ? "Sign in to an existing account to keep chatting without limits."
+                    : "Sign up to keep chatting without limits. Your current conversation and history are preserved."}
                 </Dialog.Description>
               </div>
 
@@ -241,7 +283,7 @@ function UpgradeDialog({
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   variant="outline"
-                  onClick={() => handleOAuthLink("google")}
+                  onClick={() => handleOAuth("google")}
                   disabled={!!oauthLoading || isLoading}
                 >
                   {oauthLoading === "google" ? (
@@ -253,7 +295,7 @@ function UpgradeDialog({
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => handleOAuthLink("github")}
+                  onClick={() => handleOAuth("github")}
                   disabled={!!oauthLoading || isLoading}
                 >
                   {oauthLoading === "github" ? (
@@ -272,19 +314,24 @@ function UpgradeDialog({
                 </span>
               </div>
 
-              <form onSubmit={handleEmailUpgrade} className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label htmlFor="upgrade-name">Name</Label>
-                  <Input
-                    id="upgrade-name"
-                    type="text"
-                    placeholder="Your name"
-                    autoComplete="name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    disabled={isLoading}
-                  />
-                </div>
+              <form
+                onSubmit={isLogin ? handleEmailLogin : handleEmailUpgrade}
+                className="space-y-3"
+              >
+                {!isLogin && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="upgrade-name">Name</Label>
+                    <Input
+                      id="upgrade-name"
+                      type="text"
+                      placeholder="Your name"
+                      autoComplete="name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      disabled={isLoading}
+                    />
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <Label htmlFor="upgrade-email">Email</Label>
                   <Input
@@ -304,9 +351,9 @@ function UpgradeDialog({
                     <Input
                       id="upgrade-password"
                       type={showPassword ? "text" : "password"}
-                      placeholder="Min. 8 characters"
-                      autoComplete="new-password"
-                      minLength={8}
+                      placeholder={isLogin ? "••••••••" : "Min. 8 characters"}
+                      autoComplete={isLogin ? "current-password" : "new-password"}
+                      minLength={isLogin ? undefined : 8}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
@@ -329,9 +376,41 @@ function UpgradeDialog({
                   </div>
                 </div>
                 <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Creating account…" : "Create account"}
+                  {isLoading
+                    ? isLogin
+                      ? "Signing in…"
+                      : "Creating account…"
+                    : isLogin
+                      ? "Sign in"
+                      : "Create account"}
                 </Button>
               </form>
+
+              <p className="text-center text-sm text-muted-foreground">
+                {isLogin ? (
+                  <>
+                    Don&apos;t have an account?{" "}
+                    <button
+                      type="button"
+                      onClick={() => switchMode("signup")}
+                      className="font-medium text-foreground underline underline-offset-4"
+                    >
+                      Sign up
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    Already have an account?{" "}
+                    <button
+                      type="button"
+                      onClick={() => switchMode("login")}
+                      className="font-medium text-foreground underline underline-offset-4"
+                    >
+                      Log in
+                    </button>
+                  </>
+                )}
+              </p>
             </div>
           )}
         </Dialog.Popup>
