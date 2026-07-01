@@ -7,6 +7,7 @@ import {
 } from "ai";
 import { requireAuth } from "@/lib/auth/get-user";
 import { chatModel, SYSTEM_PROMPT, generateChatTitle } from "@/lib/ai/model";
+import { buildDocumentContext } from "@/lib/ai/retrieval";
 import { getChatById, touchChat, updateChat } from "@/lib/db/chats";
 import { createMessage } from "@/lib/db/messages";
 import { createAttachment } from "@/lib/db/attachments";
@@ -155,9 +156,20 @@ export async function POST(request: Request) {
     }
   }
 
+  // Retrieval-augmented generation: if this chat has uploaded documents,
+  // fetch the most relevant chunks for the latest question and prepend them
+  // to the system prompt. No-ops (returns null) when there are no documents,
+  // so behavior is unchanged for ordinary chats.
+  const documentContext = firstUserText
+    ? await buildDocumentContext(chatId, firstUserText)
+    : null;
+  const system = documentContext
+    ? `${SYSTEM_PROMPT}\n\n${documentContext}`
+    : SYSTEM_PROMPT;
+
   const stream = streamText({
     model: chatModel,
-    system: SYSTEM_PROMPT,
+    system,
     messages: await convertToModelMessages(messages),
     onError: ({ error }) => {
       // Log the *real* provider error server-side; the client stream only ever

@@ -23,6 +23,16 @@ export const CHAT_MODEL_ID = "gemini-3.1-flash-lite";
 
 export const chatModel = google(CHAT_MODEL_ID);
 
+/**
+ * Embedding model for document RAG. `gemini-embedding-001` is generated at
+ * 768 dimensions to match the `vector(768)` column + HNSW index in the schema.
+ * Shares the same free-tier-friendly Gemini API key as the chat model.
+ */
+export const EMBEDDING_MODEL_ID = "gemini-embedding-001";
+export const EMBEDDING_DIMENSIONS = 768;
+
+export const embeddingModel = google.textEmbeddingModel(EMBEDDING_MODEL_ID);
+
 export const SYSTEM_PROMPT =
   "You are a helpful, friendly AI assistant. Answer clearly and concisely. " +
   "Use Markdown for formatting, and fenced code blocks with a language tag for code.";

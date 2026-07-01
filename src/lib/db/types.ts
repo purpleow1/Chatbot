@@ -59,3 +59,36 @@ export interface Usage {
   anon_message_count: number;
   updated_at: string;
 }
+
+export type DocumentStatus = "processing" | "ready" | "failed";
+
+export interface Document {
+  id: string;
+  chat_id: string;
+  user_id: string;
+  filename: string;
+  storage_path: string;
+  mime_type: string;
+  size_bytes: number;
+  status: DocumentStatus;
+  created_at: string;
+}
+
+export interface DocumentChunk {
+  id: string;
+  document_id: string;
+  chat_id: string;
+  user_id: string;
+  chunk_index: number;
+  content: string;
+  created_at: string;
+}
+
+/** A chunk returned from the similarity-search RPC (with source + score). */
+export interface MatchedChunk {
+  content: string;
+  document_id: string;
+  filename: string;
+  chunk_index: number;
+  similarity: number;
+}

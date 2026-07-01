@@ -1,6 +1,6 @@
 # Chatbot
 
-A ChatGPT-style AI chatbot: send messages and stream responses in real time, keep a searchable history of conversations, attach images, and try it anonymously before signing in. Built with Next.js, Google Gemini, and Supabase.
+A ChatGPT-style AI chatbot: send messages and stream responses in real time, keep a searchable history of conversations, attach images, upload documents to ground answers in your own files, and try it anonymously before signing in. Built with Next.js, Google Gemini, and Supabase.
 
 > Live demo: https://chatbot-rosy-alpha-59.vercel.app/
 
@@ -38,8 +38,10 @@ Fill in `.env.local`:
 
 ### 3. Set up Supabase
 
-1. **Run the migrations.** Open the Supabase **SQL Editor** and run each file in `supabase/migrations/` in filename order (or use `supabase db push` if you have the CLI linked).
-2. **Create the Storage bucket.** Storage → New bucket → name it `attachments`, and keep **Public bucket unchecked** (images are served via signed URLs).
+1. **Run the migrations.** Open the Supabase **SQL Editor** and run each file in `supabase/migrations/` in filename order (or use `supabase db push` if you have the CLI linked). The document-RAG migration enables the `pgvector` extension automatically.
+2. **Create the Storage buckets.** Storage → New bucket → create two private buckets (keep **Public bucket unchecked** — files are served via signed URLs):
+   - `attachments` — for pasted/attached images.
+   - `documents` — for uploaded documents used as RAG context.
 3. **Enable anonymous sign-ins.** Authentication → Sign In / Providers → enable **Anonymous Sign-ins**.
 4. **(Optional) Enable Google / GitHub OAuth.** See below.
 
@@ -66,6 +68,7 @@ In the Supabase dashboard → Authentication:
 - **Authentication** — email/password plus Google and GitHub OAuth, via Supabase Auth.
 - **Anonymous access** — try up to 3 free questions with no account, then a prompt to sign up. Upgrading keeps your existing chats.
 - **Image attachments** — paste, drag, or pick images and ask about them (Gemini vision). Images persist across reloads.
+- **Document upload + RAG** — attach PDFs, text, Markdown, or Word docs to a chat. Their text is extracted, chunked, and embedded (`gemini-embedding-001`, stored in Postgres via `pgvector`); each question retrieves the most relevant chunks and grounds the answer in them (retrieval-augmented generation).
 - **Cross-tab sync** — creating, renaming, or deleting a chat in one tab updates all other open tabs in real time (Supabase Realtime).
 - **Polished UX** — Markdown + syntax-highlighted code with copy buttons, auto-scroll, dark mode, and loading/empty/error states.
 
@@ -79,6 +82,7 @@ In the Supabase dashboard → Authentication:
 | LLM | Google Gemini via the Vercel AI SDK v5 |
 | Server | Next.js REST route handlers (`src/app/api/*`) |
 | Database | Supabase Postgres (accessed server-side only, via the service-role key) |
+| Document RAG | `pgvector` + `gemini-embedding-001` embeddings, cosine similarity search |
 | Auth | Supabase Auth (`@supabase/ssr`) |
 | Realtime | Supabase Realtime (Broadcast) |
 | Deployment | Vercel + Supabase cloud |
@@ -109,6 +113,8 @@ Client components ──fetch──▶ REST API routes ──▶ DB data-access 
 | `GET` | `/api/chats/search?q=` | Search chats by title and message content |
 | `POST` | `/api/chat` | Stream an assistant response and persist messages |
 | `POST` | `/api/uploads` | Upload an image to Storage, return a signed URL |
+| `GET` / `POST` | `/api/documents` | List a chat's documents / upload + ingest a document (extract, chunk, embed) |
+| `DELETE` | `/api/documents/[documentId]` | Remove a document, its chunks, and its stored file |
 | `GET` | `/api/usage` | Anonymous free-question count remaining |
 
 All routes are auth-guarded and scoped to the signed-in (or anonymous) user.

@@ -11,6 +11,7 @@ import { fetchUsage, usageKeys } from "@/lib/api/usage"
 import { takePendingMessage } from "@/lib/pending-message"
 import { MessageBubble, TypingIndicator } from "./message-bubble"
 import { Composer, type ComposerSubmitPayload } from "./composer"
+import { DocumentsBar } from "./documents-bar"
 import { useUpgrade } from "./upgrade"
 
 // ---------------------------------------------------------------------------
@@ -196,7 +197,11 @@ function Conversation({
           </div>
         )}
 
-        <div className="mx-auto w-full max-w-3xl px-4 pt-2 pb-4">
+        <div className="pt-2">
+          <DocumentsBar chatId={chatId} />
+        </div>
+
+        <div className="mx-auto w-full max-w-3xl px-4 pt-1 pb-4">
           <Composer
             onSend={send}
             isBusy={isBusy}
