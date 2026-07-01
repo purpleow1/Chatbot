@@ -3,15 +3,23 @@ import { requireAuth } from "@/lib/auth/get-user";
 import { chatModel, SYSTEM_PROMPT, generateChatTitle } from "@/lib/ai/model";
 import { getChatById, touchChat, updateChat } from "@/lib/db/chats";
 import { createMessage } from "@/lib/db/messages";
+import { createAttachment } from "@/lib/db/attachments";
 import { getAnonMessageCount, incrementAnonCount } from "@/lib/db/usages";
 import { ANON_MESSAGE_LIMIT } from "@/lib/constants";
+import type { MessagePart } from "@/lib/db/types";
 
 // Allow streamed responses up to 30s (Vercel serverless default cap).
 export const maxDuration = 30;
 
 type TextPart = { type: "text"; text: string };
+type AttachmentInput = {
+  storagePath: string;
+  mediaType: string;
+  sizeBytes: number;
+  filename?: string;
+};
 
-/** Extract persistable text parts from an AI SDK UIMessage. */
+/** Extract text parts from an AI SDK UIMessage. */
 function toTextParts(message: UIMessage): TextPart[] {
   return message.parts
     .filter((p) => p.type === "text")
@@ -30,14 +38,18 @@ export async function POST(request: Request) {
   if (result instanceof Response) return result;
   const { user } = result;
 
-  let body: { chatId?: string; messages?: UIMessage[] };
+  let body: {
+    chatId?: string;
+    messages?: UIMessage[];
+    attachments?: AttachmentInput[];
+  };
   try {
     body = await request.json();
   } catch {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { chatId, messages } = body;
+  const { chatId, messages, attachments = [] } = body;
   if (!chatId || !Array.isArray(messages)) {
     return Response.json(
       { error: "chatId and messages are required" },
@@ -66,17 +78,33 @@ export async function POST(request: Request) {
     }
   }
 
-  // Persist the newest user message up-front so it survives even if the
-  // client disconnects mid-stream.
+  // Locate the most recent user message to persist + title.
   const lastUserMessage = [...messages]
     .reverse()
     .find((m) => m.role === "user");
   const firstUserText = lastUserMessage ? plainText(lastUserMessage) : "";
 
+  // Persist the user message up-front so it survives a mid-stream disconnect.
+  let savedUserMessageId: string | null = null;
   if (lastUserMessage) {
-    const parts = toTextParts(lastUserMessage);
-    if (parts.length > 0) {
-      await createMessage({ chatId, role: "user", parts });
+    const textParts = toTextParts(lastUserMessage);
+
+    // Build file parts: replace the signed URL with the durable storagePath
+    // so the stored part can be re-signed on load instead of expiring.
+    const rawFileParts = lastUserMessage.parts.filter(
+      (p) => p.type === "file",
+    ) as Array<{ type: "file"; url: string; mediaType: string; filename?: string }>;
+    const fileParts: MessagePart[] = rawFileParts.map((p, i) => ({
+      type: "file",
+      url: attachments[i]?.storagePath ?? p.url,
+      mediaType: attachments[i]?.mediaType ?? p.mediaType,
+      filename: attachments[i]?.filename ?? p.filename,
+    }));
+
+    const allParts: MessagePart[] = [...textParts, ...fileParts];
+    if (allParts.length > 0) {
+      const saved = await createMessage({ chatId, role: "user", parts: allParts });
+      savedUserMessageId = saved.id;
     }
   }
 
@@ -98,9 +126,26 @@ export async function POST(request: Request) {
   return stream.toUIMessageStreamResponse({
     onFinish: async ({ responseMessage, isAborted }) => {
       try {
-        const parts = toTextParts(responseMessage);
-        if (parts.length > 0) {
-          await createMessage({ chatId, role: "assistant", parts });
+        // Persist the assistant reply (text parts only; no attachments on assistant side).
+        const textParts = toTextParts(responseMessage);
+        if (textParts.length > 0) {
+          await createMessage({ chatId, role: "assistant", parts: textParts });
+        }
+
+        // Persist attachment rows now that we have the message id.
+        if (savedUserMessageId && attachments.length > 0) {
+          await Promise.all(
+            attachments.map((att) =>
+              createAttachment({
+                messageId: savedUserMessageId!,
+                chatId,
+                userId: user.id,
+                storagePath: att.storagePath,
+                mimeType: att.mediaType,
+                sizeBytes: att.sizeBytes,
+              }),
+            ),
+          );
         }
 
         // Bump updated_at so the chat floats to the top of the sidebar.

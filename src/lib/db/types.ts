@@ -5,12 +5,15 @@
 export type MessageRole = "user" | "assistant" | "system";
 
 /**
- * A single part of a message, matching Vercel AI SDK v5 UIMessage parts.
+ * A single part of a message, matching AI SDK v7 UIMessage parts.
  * Stored as jsonb in the messages.parts column.
+ *
+ * For "file" parts, `url` holds the Supabase Storage path (not a signed URL).
+ * The messages API route generates fresh signed URLs before returning them.
  */
 export type MessagePart =
   | { type: "text"; text: string }
-  | { type: "image"; image: string; mimeType?: string }
+  | { type: "file"; url: string; mediaType: string; filename?: string }
   | { type: "tool-invocation"; toolInvocationId: string; toolName: string; args: unknown; result?: unknown; state: string }
   | { type: "tool-result"; toolCallId: string; toolName: string; result: unknown };
 
