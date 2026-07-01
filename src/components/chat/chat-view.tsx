@@ -8,7 +8,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { chatKeys } from "@/lib/api/chats"
 import { fetchMessages, messageKeys, toUIMessage } from "@/lib/api/messages"
 import { fetchUsage, usageKeys } from "@/lib/api/usage"
-import { takePendingMessage } from "@/lib/pending-message"
+import {
+  markPendingMessageSent,
+  peekPendingMessage,
+  takePendingMessage,
+  wasPendingMessageSent,
+} from "@/lib/pending-message"
 import { consumePendingDraft, peekPendingDraft } from "@/lib/pending-draft"
 import { MessageBubble, TypingIndicator } from "./message-bubble"
 import { Composer, type ComposerSubmitPayload } from "./composer"
@@ -19,6 +24,10 @@ import { useUpgrade } from "./upgrade"
 // ---------------------------------------------------------------------------
 
 export function ChatView({ chatId }: { chatId: string }) {
+  const hasPendingHandoff =
+    peekPendingMessage(chatId) !== undefined ||
+    peekPendingDraft(chatId) !== undefined
+
   const {
     data: initialMessages,
     isPending,
@@ -29,7 +38,10 @@ export function ChatView({ chatId }: { chatId: string }) {
     staleTime: Infinity,
   })
 
-  if (isPending) {
+  // When navigating from the home screen with a composed first message, mount
+  // the live conversation immediately so the optimistic user bubble appears
+  // without waiting for an empty history fetch.
+  if (isPending && !hasPendingHandoff) {
     return (
       <div className="mx-auto flex h-full w-full max-w-3xl flex-col gap-4 p-4">
         <Skeleton className="h-16 w-2/3" />
@@ -51,7 +63,7 @@ export function ChatView({ chatId }: { chatId: string }) {
     <Conversation
       key={chatId}
       chatId={chatId}
-      initialMessages={initialMessages.map(toUIMessage)}
+      initialMessages={(initialMessages ?? []).map(toUIMessage)}
     />
   )
 }
@@ -136,6 +148,8 @@ function Conversation({
       } as UIMessage["parts"][number])
     }
 
+    if (parts.length === 0) return
+
     sendMessage(
       { parts },
       documents.length > 0 || payload.attachments.length > 0
@@ -143,18 +157,6 @@ function Conversation({
         : undefined,
     )
   }
-
-  // Auto-send a message composed on the home screen before this chat existed.
-  const sentPendingRef = useRef(false)
-  useEffect(() => {
-    if (sentPendingRef.current) return
-    const pending = takePendingMessage(chatId)
-    if (pending && (pending.text || pending.files.length > 0)) {
-      sentPendingRef.current = true
-      send(pending)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId])
 
   // Cross-tab sync: shares the cache with ChatView's query, so a realtime
   // broadcast that invalidates messageKeys.list(chatId) refetches here.
@@ -164,18 +166,37 @@ function Conversation({
     staleTime: Infinity,
   })
 
-  const statusRef = useRef(status)
+  // Auto-send a message composed on the home screen before this chat existed.
+  // Runs before the DB sync effect so the optimistic user bubble is never
+  // clobbered by an empty history fetch.
   useEffect(() => {
-    statusRef.current = status
-  }, [status])
+    if (wasPendingMessageSent(chatId)) return
+    const pending = peekPendingMessage(chatId)
+    if (
+      !pending ||
+      !(pending.text || pending.files.length > 0 || (pending.documents?.length ?? 0) > 0)
+    ) {
+      return
+    }
+    markPendingMessageSent(chatId)
+    takePendingMessage(chatId)
+    send(pending)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId])
 
   useEffect(() => {
     if (!syncedMessages) return
-    if (statusRef.current === "streaming" || statusRef.current === "submitted") {
-      return
-    }
-    setMessages(syncedMessages.map(toUIMessage))
-  }, [syncedMessages, setMessages])
+    // Use live status — a ref lags one render and can wipe optimistic messages
+    // while a response is already in flight.
+    if (status === "streaming" || status === "submitted") return
+
+    const synced = syncedMessages.map(toUIMessage)
+    setMessages((current) => {
+      // Keep optimistic messages until the server history catches up.
+      if (current.length > synced.length) return current
+      return synced
+    })
+  }, [syncedMessages, setMessages, status])
 
   const atFreeLimit = usage?.isAnonymous === true && usage.remaining <= 0
   const isBusy = status === "submitted" || status === "streaming"

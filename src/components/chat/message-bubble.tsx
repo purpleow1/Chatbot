@@ -54,28 +54,32 @@ export function MessageBubble({ message }: { message: UIMessage }) {
   const documentParts = message.parts.filter(isDocumentPart)
 
   if (isUser) {
+    const hasBubbleContent = text.length > 0 || imageParts.length > 0
+
     return (
       <div className="group/msg flex w-full animate-in fade-in slide-in-from-bottom-1 justify-end duration-300">
         <div className="flex max-w-[85%] flex-col items-end gap-1">
           {documentParts.length > 0 && <DocumentChips parts={documentParts} />}
-          <div className="overflow-hidden rounded-2xl bg-primary text-sm text-primary-foreground">
-            {imageParts.length > 0 && (
-              <div className={cn("flex flex-wrap gap-1", text ? "p-1 pb-0" : "p-1")}>
-                {imageParts.map((part, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={i}
-                    src={part.url}
-                    alt={part.filename ?? "Attached image"}
-                    className="max-h-64 max-w-full rounded-xl object-contain"
-                  />
-                ))}
-              </div>
-            )}
-            {text && (
-              <p className="px-4 py-2.5 break-words whitespace-pre-wrap">{text}</p>
-            )}
-          </div>
+          {hasBubbleContent && (
+            <div className="overflow-hidden rounded-2xl bg-primary text-sm text-primary-foreground">
+              {imageParts.length > 0 && (
+                <div className={cn("flex flex-wrap gap-1", text ? "p-1 pb-0" : "p-1")}>
+                  {imageParts.map((part, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={i}
+                      src={part.url}
+                      alt={part.filename ?? "Attached image"}
+                      className="max-h-64 max-w-full rounded-xl object-contain"
+                    />
+                  ))}
+                </div>
+              )}
+              {text && (
+                <p className="px-4 py-2.5 break-words whitespace-pre-wrap">{text}</p>
+              )}
+            </div>
+          )}
           {text && (
             <div className="opacity-0 transition-opacity group-hover/msg:opacity-100">
               <CopyButton value={text} label="Copy message" />
