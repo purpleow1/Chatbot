@@ -1,5 +1,6 @@
 import { requireAuth } from "@/lib/auth/get-user";
 import { getChatsByUserId, createChat } from "@/lib/db/chats";
+import { broadcastChatEvent } from "@/lib/realtime/broadcast";
 import type { NextRequest } from "next/server";
 
 export async function GET() {
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const chat = await createChat(user.id, title);
+    await broadcastChatEvent(user.id, { type: "chat.created", chatId: chat.id });
     return Response.json(chat, { status: 201 });
   } catch {
     return Response.json({ error: "Failed to create chat" }, { status: 500 });

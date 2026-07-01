@@ -6,10 +6,13 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Sidebar } from "./sidebar"
 import { UpgradeProvider, UsageBanner } from "./upgrade"
+import { useRealtimeSync } from "@/hooks/use-realtime-sync"
 
 export function ChatLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
+  useRealtimeSync()
 
   return (
     <UpgradeProvider>

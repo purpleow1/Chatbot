@@ -6,6 +6,7 @@ import { createMessage } from "@/lib/db/messages";
 import { createAttachment } from "@/lib/db/attachments";
 import { getAnonMessageCount, incrementAnonCount } from "@/lib/db/usages";
 import { ANON_MESSAGE_LIMIT } from "@/lib/constants";
+import { broadcastChatEvent } from "@/lib/realtime/broadcast";
 import type { MessagePart } from "@/lib/db/types";
 
 // Allow streamed responses up to 30s (Vercel serverless default cap).
@@ -156,6 +157,9 @@ export async function POST(request: Request) {
           const title = await generateChatTitle(firstUserText);
           await updateChat(chatId, user.id, { title });
         }
+
+        // Notify other tabs that this chat has been updated (new messages / title).
+        await broadcastChatEvent(user.id, { type: "chat.updated", chatId });
       } catch (error) {
         console.error("[api/chat] failed to persist assistant message:", error);
       }
