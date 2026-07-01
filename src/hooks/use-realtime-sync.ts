@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { usePathname, useRouter } from "next/navigation";
 import { realtimeClient } from "@/lib/supabase/realtime";
 import { chatKeys } from "@/lib/api/chats";
 import { messageKeys } from "@/lib/api/messages";
@@ -20,6 +21,8 @@ type BroadcastPayload = { type: string; chatId?: string };
 export function useRealtimeSync() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const pathname = usePathname();
+  const router = useRouter();
 
   useEffect(() => {
     if (!user) return;
@@ -40,13 +43,18 @@ export function useRealtimeSync() {
           });
         }
       })
-      .on("broadcast", { event: "chat.deleted" }, () => {
+      .on("broadcast", { event: "chat.deleted" }, ({ payload }) => {
         queryClient.invalidateQueries({ queryKey: chatKeys.list() });
+        const chatId = (payload as BroadcastPayload)?.chatId;
+        // If this tab is viewing the deleted chat, redirect to the new-chat page.
+        if (chatId && pathname === `/c/${chatId}`) {
+          router.push("/");
+        }
       })
       .subscribe();
 
     return () => {
       realtimeClient.removeChannel(channel);
     };
-  }, [user?.id, queryClient]);
+  }, [user?.id, queryClient, pathname, router]);
 }

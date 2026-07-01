@@ -63,6 +63,9 @@ export function ChatItem({ chat }: ChatItemProps) {
       queryClient.setQueryData<Chat[]>(chatKeys.list(), (old) =>
         old?.filter((c) => c.id !== chat.id),
       )
+      // Redirect before the optimistic removal unmounts this component —
+      // in TanStack Query v5, onSuccess is never called after unmount.
+      if (isActive) router.push("/")
       return { previous }
     },
     onError: (_err, _vars, context) => {
@@ -70,9 +73,6 @@ export function ChatItem({ chat }: ChatItemProps) {
         queryClient.setQueryData(chatKeys.list(), context.previous)
       }
       toast.error("Couldn't delete chat", { description: "Please try again." })
-    },
-    onSuccess: () => {
-      if (isActive) router.push("/")
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: chatKeys.list() })
